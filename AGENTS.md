@@ -1,4 +1,4 @@
-# NekoBox-Ohos · AI Agent 交接说明
+# ReedBox（原 NekoBox-Ohos）· AI Agent 交接说明
 
 > 读这一篇就够了；机器级底座（工具链 / 构建 / WebDAV / MCP）在
 > `C:\Users\Administrator\Desktop\RzdProject\全局记忆.md`，项目现状在
@@ -9,7 +9,9 @@
 HarmonyOS NEXT 的 sing-box 客户端（对齐 NekoBoxForAndroid）。内核 = sing-box 1.14.0 的
 c-shared `.so`，进程内 `dlopen`，TUN fd 由 `VpnExtensionAbility` 直接交给内核。
 
-- bundleName **`com.rzdpai.nekobox`**（versionName 0.1.0 / versionCode 100000）
+- 显示名 **ReedBox**、仓库 **https://github.com/RzdPai/ReedBox**（2026-11-16 改名/开源）；目录仍叫 `RzdBox/`
+- bundleName **`com.rzdpai.nekobox`**（**没跟着改名**：改它等于装一个新应用，老数据不迁；见项目记忆第六十三轮 A）
+- versionName **0.5.59** / versionCode **500059**（以 `AppScope/app.json5` 为准）
 - compatible/target **6.1.1(24)**，deviceTypes phone/tablet
 - 状态管理**全 V2**、路由**只走 Navigation**、UI 组件优先 HDS —— 这三条是硬规则，别回退。
 

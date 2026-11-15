@@ -1433,7 +1433,7 @@ Existing notification files reviewed:
 - 新增极简 `README.md`(介绍 / 协议列表 / 构建命令 / 归因),原详细说明挪到 `docs/工程说明.md`(`build-profile.json5` 里的引用一并改);
   新增 `LICENSE`(GPL-3.0 全文,与 sing-box / NekoBoxForAndroid 一致)。
 - 仓库:`https://github.com/RzdPai/ReedBox`(public),推送整棵树(含冻结的 `entry/libs/arm64-v8a/libsingbox.so` 与 `core/` 内核源码)。
-  推送前扫过 `ghp_` / 私钥 / 明文口令:无命中(`HANDOFF.md` 里那句"密码存外部记忆"是有意留下的说明)。
+  推送前扫过 GitHub token 前缀 / 私钥 / 明文口令:无命中(`HANDOFF.md` 里那句"密码存外部记忆"是有意留下的说明)。
 
 ### 改动文件
 
