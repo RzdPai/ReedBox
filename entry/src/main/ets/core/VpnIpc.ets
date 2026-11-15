@@ -71,15 +71,24 @@ export function publishVpnStatus(status: string, running: boolean, profileId: st
   }
 }
 
-/** 扩展进程调用:把实时流量数据同步到 UI 进程。 */
-export function publishVpnTraffic(upSpeed: number, downSpeed: number, totalUp: number, totalDown: number): void {
+/**
+ * 扩展进程调用:把实时流量数据同步到 UI 进程。
+ *
+ * ★ 顺带带上 `running/profileId`:UI 进程被回收后重开时,`VpnRuntime` 是全新的"未连接",
+ *   而扩展进程一直在跑 —— 只发状态事件的话要等到下一次连接/切换才会更新,
+ *   于是"进软件看到未连接、速度 0"。每秒一次的流量事件足以把状态补回来。
+ */
+export function publishVpnTraffic(upSpeed: number, downSpeed: number, totalUp: number, totalDown: number,
+  running: boolean = true, profileId: string = ''): void {
   mirrorTrafficToRuntime(upSpeed, downSpeed, totalUp, totalDown);
   try {
     const payload: Record<string, string> = {
       'upSpeed': `${upSpeed}`,
       'downSpeed': `${downSpeed}`,
       'totalUp': `${totalUp}`,
-      'totalDown': `${totalDown}`
+      'totalDown': `${totalDown}`,
+      'running': running ? 'true' : 'false',
+      'profileId': profileId
     };
     const opts: commonEventManager.CommonEventPublishData = {
       bundleName: APP_BUNDLE,
@@ -131,7 +140,8 @@ let subscriptionGeneration: number = 0;
 /** UI 进程调用:订阅扩展发来的日志、状态与流量 */
 export function subscribeVpnEvents(onLog: (line: string) => void,
   onStatus: (status: string, running: boolean, profileId: string) => void,
-  onTraffic: (upSpeed: number, downSpeed: number, totalUp: number, totalDown: number) => void): void {
+  onTraffic: (upSpeed: number, downSpeed: number, totalUp: number, totalDown: number,
+    running: boolean, profileId: string) => void): void {
   const generation = ++subscriptionGeneration;
   const info: commonEventManager.CommonEventSubscribeInfo = {
     events: [VPN_EVENT_LOG, VPN_EVENT_STATUS, VPN_EVENT_TRAFFIC]
@@ -165,8 +175,11 @@ export function subscribeVpnEvents(onLog: (line: string) => void,
           const downSpeed = Number(obj['downSpeed']);
           const totalUp = Number(obj['totalUp']);
           const totalDown = Number(obj['totalDown']);
+          // 缺字段(旧版扩展)按"仍在跑 + 未知节点"处理:宁可让 UI 沿用已有状态,也不误报未连接
+          const running: boolean = obj['running'] === undefined ? true : `${obj['running']}` === 'true';
+          const profileId: string = obj['profileId'] === undefined ? '' : `${obj['profileId']}`;
           if (!isNaN(upSpeed) && !isNaN(downSpeed) && !isNaN(totalUp) && !isNaN(totalDown)) {
-            onTraffic(upSpeed, downSpeed, totalUp, totalDown);
+            onTraffic(upSpeed, downSpeed, totalUp, totalDown, running, profileId);
           }
         } catch (e) {
           // 忽略格式错误的流量数据

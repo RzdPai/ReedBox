@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
-const ts = require('D:/command-line-tools/sdk/default/openharmony/ets/build-tools/ets-loader/node_modules/typescript/lib/typescript.js');
+const ts = require(process.env.TS_LIB || '/root/command-line-tools/arktsdoc/node_modules/typescript/lib/typescript.js');
 const root = path.resolve(__dirname, '..');
 const ets = path.join(root, 'entry', 'src', 'main', 'ets');
 const logs = [];
@@ -239,6 +239,19 @@ async function main() {
     assert.equal(observations.at(-1).vpnRunning, false);
     assert.equal(app.statusText(), '未连接');
   });
+  // 会话结束的流量事件不能把"未连接"改成"已连接"；仍在跑的那条要把状态补回来
+  app.applyTraffic(0, 0, 5000, 6000, false, '');
+  checked('A session-end traffic event never revives a stopped tunnel', () => {
+    assert.equal(app.vpnRunning, false);
+  });
+  app.applyTraffic(9, 8, 9000, 8000, true, 'node-B');
+  checked('Traffic events revive a restarted UI process while the tunnel keeps running', () => {
+    assert.equal(app.vpnRunning, true);
+    assert.equal(app.runningProfileId, 'node-B');
+    assert.equal(app.downSpeed, 8);
+  });
+  app.applyVpnStatus('disconnected', false, '');
+
   await app.patchSettings(s => { s.mtu = 1280; });
   checked('Settings callback sees the committed new value', () => {
     assert.equal(observations.at(-1).mtu, 1280);
@@ -678,9 +691,15 @@ async function main() {
     // 切分组：**系统 Tabs** 负责切换动画（不再自绘 translate/animateTo）
     const home2 = source('ui/neko/ProfilesPage.ets');
     assert.match(home2, /private tabsController: TabsController = new TabsController\(\);/);
+    // 只给 controller（带 index 会吃掉切页动画）；首帧对齐靠延后一帧的一次性 realign
     assert.match(home2, /Tabs\(\{ barPosition: BarPosition\.Start, controller: this\.tabsController \}\)/);
+    assert.match(home2, /private realignTabsToSelectedGroup\(\): void \{/);
+    assert.match(home2, /this\.realignTimer = setTimeout\(\(\): void => \{/);
+    assert.match(home2, /this\.realignTimer = -1;/);
     assert.match(home2, /\.animationDuration\(\d+\)/);
     assert.match(home2, /this\.tabsController\.changeIndex\(index\);/);
+    // 系统回调不能把页签写回真源（首帧会先落到 0，写了就把恢复的分组覆盖掉）
+    assert.doesNotMatch(home2.slice(home2.indexOf('.onChange((index: number)'), home2.indexOf('.onChange((index: number)') + 1200), /selectGroupById/);
     assert.match(home2, /ForEach\(this\.groupRowsFor\(/);
     assert.doesNotMatch(home2, /listShift|listAlpha|groupSwitchGen/);
     // ★ ForEach 同 key 不会重跑 itemGenerator ⇒ 行模型必须按 id 复用（否则切节点 UI 不刷新）
@@ -881,6 +900,189 @@ async function main() {
     assert.match(header, /if \(generation !== this\.animGeneration\) \{/);
     assert.match(header, /const latest: boolean = this\.handRight\(\);/);
     assert.match(header, /aboutToDisappear\(\): void \{[\s\S]{0,160}this\.animGeneration\+\+;/);
+  });
+
+  // ---- 测速：并发请求必须如实回报（甲方 2026-11-15：TCPing 没跑完点 URL Test 直接提示已完成）----
+  class StubLatencyOutcome {
+    constructor() {
+      this.ran = false; this.busy = false; this.urlMode = false; this.ok = 0; this.total = 0;
+      this.degraded = false; this.degradeReason = ''; this.bindFallback = false; this.reason = '';
+    }
+  }
+  class StubLatencyPassCount {
+    constructor() { this.ok = 0; this.total = 0; }
+  }
+  let releaseUrlTest = () => {};
+  let urlTestRuns = 0;
+  const stubLatency = {
+    LatencyTestOutcome: StubLatencyOutcome,
+    LatencyPassCount: StubLatencyPassCount,
+    async testProfiles(targets, onResult) {
+      for (const target of targets) { onResult(target.id, 11); }
+      const count = new StubLatencyPassCount();
+      count.ok = targets.length; count.total = targets.length;
+      return count;
+    },
+    async urlTestProfiles(targets, all, settings, context, onResult) {
+      urlTestRuns++;
+      await new Promise(resolve => { releaseUrlTest = resolve; });
+      onResult(targets[0].id, 42);
+      return { degraded: false, degradeReason: '', bindFallback: false, ok: 1, total: targets.length };
+    }
+  };
+  let latencyProfiles = [a, b];
+  const storeLatency = {
+    LogStore,
+    async loadProfiles() { return latencyProfiles; },
+    async loadGroups() { return [g]; },
+    async loadSettings() { return new models.AppSettings(); },
+    async saveSettings() {},
+    async initStore() {},
+    async getRunningProfileId() { return ''; },
+    async readPrefString(key, def) { return def === undefined ? '' : def; },
+    async writePrefString() {},
+    async saveGroups() {},
+    async saveProfiles(list) { latencyProfiles = list; },
+    async mutateProfiles(fn) { latencyProfiles = fn(latencyProfiles.slice()); return latencyProfiles; },
+    async ensureGroupByName() { return g.id; }
+  };
+  const appModule4 = load('core/AppState.ets', {
+    '@ohos.app.ability.common': {},
+    '../model/Profile': models,
+    '../model/Store': storeLatency,
+    '../model/RouteRule': { async loadRouteRules() { return []; }, async loadRemoteRuleSets() { return []; } },
+    './Subscriptions': { async listSubs() { return []; }, setAppContext() {} },
+    './VpnService': serviceModule,
+    './VpnRuntime': runtimeModule,
+    '../utils/LinkParser': {},
+    '../utils/Subscription': { subErrorText: e => `${e}` },
+    '../utils/LatencyTester': stubLatency,
+    '../utils/GeoAssets': { async downloadGeoAsset() { return ''; } },
+    '../ui/Accent': accentModule,
+    './Handedness': { Handedness: { get() { return { side: 'right', start() {}, setEnabled() {} }; } } }
+  });
+  const app4 = appModule4.AppState.get();
+  app4.attachContext(ctx);
+  const running = app4.testLatency([a, b], 'url');
+  const rejected = await app4.testLatency([a, b], 'tcp');
+  checked('A second latency run is refused with a reason instead of being reported as complete', () => {
+    assert.equal(urlTestRuns, 1);
+    assert.equal(rejected.ran, false);
+    assert.equal(rejected.busy, true);
+    assert.match(rejected.reason, /正在/);
+    assert.equal(app4.testing, true);
+    assert.equal(app4.testLabel, 'URL Test');
+  });
+  releaseUrlTest();
+  const finished = await running;
+  checked('The finished run reports how many nodes actually answered', () => {
+    assert.equal(finished.ran, true);
+    assert.equal(finished.ok, 1);
+    assert.equal(finished.total, 2);
+    assert.equal(app4.testing, false);
+    assert.equal(app4.testDone, 0);
+    assert.equal(app4.testLabel, '');
+    assert.equal(a.latencyMs, 42);
+  });
+  const tcpOutcome = await app4.testLatency([a, b], 'tcp');
+  checked('TCPing runs report their own pass count without touching the URL Test path', () => {
+    assert.equal(tcpOutcome.ran, true);
+    assert.equal(tcpOutcome.urlMode, false);
+    assert.equal(tcpOutcome.ok, 2);
+    assert.equal(urlTestRuns, 1);
+  });
+
+  // 双击同一个入口：第一轮在 await 落盘"测速方式"时，第二轮必须已经被挡住
+  await app4.patchSettings(s => { s.latencyTestMode = 'url'; });
+  const firstTap = app4.testLatency([a, b], 'tcp');
+  const secondTap = await app4.testLatency([a], 'tcp');
+  checked('Double-tapping a test entry cannot start two runs while the mode is being saved', () => {
+    assert.equal(secondTap.ran, false);
+    assert.equal(secondTap.busy, true);
+    assert.equal(app4.testing, true);
+  });
+  const firstTapOutcome = await firstTap;
+  checked('The first tap still completes and records the chosen mode', () => {
+    assert.equal(firstTapOutcome.ran, true);
+    assert.equal(firstTapOutcome.ok, 2);
+    assert.equal(app4.settings.latencyTestMode, 'tcp');
+  });
+
+  // ---- 分组页签：真源在 AppState 且按 id 落盘（重进软件/组件重建都不该回到第 1 个）----
+  const other = new models.ProfileGroup();
+  other.id = 'group-B'; other.name = 'Manual';
+  a.groupId = g.id; b.groupId = g.id;
+  let tabPrefs = { selected_group_id: other.id, selected_profile_id: 'node-B' };
+  const tabStore = {
+    LogStore,
+    async loadProfiles() { return [a, b]; },
+    async loadGroups() { return [g, other]; },
+    async loadSettings() { return new models.AppSettings(); },
+    async saveSettings() {},
+    async initStore() {},
+    async getRunningProfileId() { return ''; },
+    async readPrefString(key, def) {
+      const saved = tabPrefs[key];
+      return saved === undefined ? (def === undefined ? '' : def) : saved;
+    },
+    async writePrefString(key, value) { tabPrefs[key] = value; },
+    async saveGroups() {},
+    async saveProfiles() {},
+    async mutateProfiles(fn) { return fn([a, b]); },
+    async ensureGroupByName() { return g.id; }
+  };
+  const appModule5 = load('core/AppState.ets', {
+    '@ohos.app.ability.common': {},
+    '../model/Profile': models,
+    '../model/Store': tabStore,
+    '../model/RouteRule': { async loadRouteRules() { return []; }, async loadRemoteRuleSets() { return []; } },
+    './Subscriptions': { async listSubs() { return []; }, setAppContext() {} },
+    './VpnService': serviceModule,
+    './VpnRuntime': runtimeModule,
+    '../utils/LinkParser': {},
+    '../utils/Subscription': { subErrorText: e => `${e}` },
+    '../utils/LatencyTester': stubLatency,
+    '../utils/GeoAssets': { async downloadGeoAsset() { return ''; } },
+    '../ui/Accent': accentModule,
+    './Handedness': { Handedness: { get() { return { side: 'right', start() {}, setEnabled() {} }; } } }
+  });
+  const app5 = appModule5.AppState.get();
+  app5.attachContext(ctx);
+  await app5.ensureInit();
+  checked('Cold start restores the group tab the user was on, not the first group', () => {
+    assert.equal(app5.selectedGroupId, other.id);
+  });
+  app5.selectGroupById(g.id);
+  checked('Switching group tabs persists the group id for the next launch', () => {
+    assert.equal(app5.selectedGroupId, g.id);
+    assert.equal(tabPrefs['selected_group_id'], g.id);
+  });
+  app5.selectGroupById('group-deleted');
+  checked('A tab pointing at a deleted group is ignored instead of blanking the list', () => {
+    assert.equal(app5.selectedGroupId, g.id);
+  });
+
+  // ---- 数据保全：订阅更新/测速写盘不能把延迟与流量抹掉（甲方 2026-11-15）----
+  checked('A subscription refresh carries latency and traffic onto the rebuilt nodes', () => {
+    const text = source('core/Subscriptions.ets');
+    assert.match(text, /function carryRuntimeData\(target: Profile, previous: Profile\): void \{/);
+    assert.match(text, /target\.latencyMs = previous\.latencyMs;/);
+    assert.match(text, /target\.rx = previous\.rx;/);
+    assert.match(text, /carryRuntimeData\(p, fuzzy\);/);
+    // 落库前用磁盘上最新一份再刷一遍：fetch 期间的测速结果不能被 fetch 开始时的快照覆盖
+    assert.match(text, /const latest: Array<Profile> = await loadProfiles\(\);/);
+  });
+  checked('Latency tests persist field-by-field instead of replacing the whole profile table', () => {
+    // 注释里会提到旧写法，检查前先剥掉注释
+    const text = source('core/AppState.ets').replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\r\n]*/g, '');
+    assert.match(text, /private async applyLatencyBatch\(batch: Map<string, number>\)/);
+    assert.match(text, /private async flushLatency\(\): Promise<void> \{/);
+    assert.doesNotMatch(text, /saveProfiles\(this\.profiles\)/);
+  });
+  checked('Editing a node keeps the runtime columns already on disk', () => {
+    const text = source('core/AppState.ets');
+    assert.match(text, /p\.latencyMs = item\.latencyMs;/);
+    assert.match(text, /p\.rx = item\.rx;/);
   });
 
   // A filename match is not evidence of success: inspect every ETS file recursively.

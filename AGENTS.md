@@ -27,13 +27,20 @@ c-shared `.so`，进程内 `dlopen`，TUN fd 由 `VpnExtensionAbility` 直接交
 
 ## 构建
 
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File tools\build.ps1 -Product default   # neko 皮肤
-powershell -NoProfile -ExecutionPolicy Bypass -File tools\build.ps1 -Product modern    # modern 皮肤
+**当前构建机 = Linux 服务器 `hcss-ecs-d924`（工具链 `/root/command-line-tools`）**：
+
+```bash
+cd /root/Project/RzdBox
+/root/command-line-tools/bin/hvigorw assembleHap --mode module -p product=default -p buildMode=debug --no-daemon
+# 产物 entry/build/default/outputs/default/entry-default-unsigned.hap（无 signingConfig ⇒ 未签名）
 ```
 
-- **必须用 `D:\command-line-tools\bin\hvigorw.bat`**（它把自带 node 24 放进 PATH）。
-  系统 `node hvigorw.js` 会 `MODULE_NOT_FOUND: @ohos/hvigor-ohos-plugin`。
+- `hvigor/hvigor-config.json5` 的 `dependencies` 已**清空**（原来写死作者 Windows 机
+  `file:D:/command-line-tools/hvigor/hvigor{,-ohos-plugin}`，在 Linux 上会 Install 到不存在的目录 ⇒
+  `00308003 … workspace/node_modules/@ohos/hvigor/bin/hvigor.js` ENOENT）。要回到 Windows 直连入口再把那两行填回去。
+- 自检：`node tools/check-state-chain.cjs`（typescript 路径可用 `TS_LIB=<path>` 覆盖）。
+- 历史 Windows 流程（保留备用）：`powershell -File tools\build.ps1 -Product default`，
+  必须用 `D:\command-line-tools\bin\hvigorw.bat`；系统 `node hvigorw.js` 会 `MODULE_NOT_FOUND`。
 - product 名必须是 `default`（hvigor 硬性要求有一个叫 default 的 product）+ `modern`。
 - 产物在 `entry/build/<product>/outputs/default/`；拷进 `dist/` 时按产品名分开放。
 - 仓库无签名配置，只能出未签名 HAP；要装机走 DevEco 自动签名（或 AGC 证书 + `hap-sign-tool`）。

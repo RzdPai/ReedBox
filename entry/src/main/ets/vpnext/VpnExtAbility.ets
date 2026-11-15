@@ -73,6 +73,8 @@ export default class VpnExtAbility extends VpnExtensionAbility {
   private notificationGroupName: string = '';
   /** 连续通知发布失败计数:通知被关闭时不再按 speedInterval(1s) 无界重试刷日志。 */
   private notificationFailStreak: number = 0;
+  /** 本次会话流量落库的 promise（断开流程要等它写完再发 disconnected，见 awaitTrafficPersist） */
+  private pendingTrafficPersist: Promise<void> | null = null;
   // 网络变化重置连接(功能对齐安卓 networkChangeResetConnections,2.0.2 起默认关)
   private netConnection: connection.NetConnection | null = null;
   private netChangeGeneration: number = 0;
@@ -349,6 +351,7 @@ export default class VpnExtAbility extends VpnExtensionAbility {
     await setRunningProfileId('');
     this.started = false;
     this.starting = false;
+    await this.awaitTrafficPersist();
     if (!silent) {
       publishVpnStatus('disconnected', false);
     }
@@ -640,8 +643,9 @@ export default class VpnExtAbility extends VpnExtensionAbility {
       this.notificationLastAt = startedAt;
       this.notificationTotalUp = totals.up;
       this.notificationTotalDown = totals.down;
+      // 带上"会话仍在跑 + 当前节点":UI 进程新起时靠这条把连接状态补回来
       publishVpnTraffic(this.notificationUpSpeed, this.notificationDownSpeed,
-        this.notificationTotalUp, this.notificationTotalDown);
+        this.notificationTotalUp, this.notificationTotalDown, true, this.currentRunId);
       await this.showConnectedNotification(this.currentNodeName, this.notificationLatencyMs);
     };
     void poll();
@@ -657,8 +661,16 @@ export default class VpnExtAbility extends VpnExtensionAbility {
       clearInterval(this.notificationTrafficTimer);
       this.notificationTrafficTimer = -1;
     }
-    // 会话流量累加到节点历史统计(对齐安卓 TrafficLooper.stop 的 finally traffic post)
-    void this.persistSessionTraffic();
+    /**
+     * 会话流量累加到节点历史统计(对齐安卓 TrafficLooper.stop 的 finally traffic post)。
+     * ★ 保留 promise 而不 `void` 掉：断开流程要等它真的写进库，再向 UI 发 disconnected ——
+     *   UI 收到断开信号会重读节点表，先发信号后写库的话，节点卡上的 ↑tx ↓rx 永远是旧的
+     *   （甲方 2026-11-15："有时候进的软件里速度数据会丢失"）。
+     * 只起一次：teardown 会再调一次本方法，但那时累计值已清零，不该覆盖正在写的那一个。
+     */
+    if (this.pendingTrafficPersist === null) {
+      this.pendingTrafficPersist = this.persistSessionTraffic();
+    }
     this.notificationLastUp = 0;
     this.notificationLastDown = 0;
     this.notificationLastAt = 0;
@@ -696,11 +708,26 @@ export default class VpnExtAbility extends VpnExtensionAbility {
         }
         return profiles;
       });
-      publishVpnTraffic(0, 0, up, down);
+      // 会话已结束:running=false,别让 UI 把"刚断开"又当成"还在连"
+      publishVpnTraffic(0, 0, up, down, false, '');
     } catch (e) {
       const msg = e instanceof Error ? e.message : `${e}`;
       LogStore.addLog(`[vpn] 会话流量持久化失败: ${msg}`);
     }
+  }
+
+  /** 等会话流量写完（断开流程在发 disconnected 之前调用，保证 UI 重读时统计已落库） */
+  private async awaitTrafficPersist(): Promise<void> {
+    const pending: Promise<void> | null = this.pendingTrafficPersist;
+    if (pending === null) {
+      return;
+    }
+    try {
+      await pending;
+    } catch (e) {
+      LogStore.addLog(`[vpn] 等待会话流量落库失败: ${e}`);
+    }
+    this.pendingTrafficPersist = null;
   }
 
   private formatNotificationSpeed(bytesPerSecond: number): string {

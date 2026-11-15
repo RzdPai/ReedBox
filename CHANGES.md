@@ -1310,3 +1310,87 @@ Existing notification files reviewed:
 - 构建与签名: `assembleHap --mode module -p product=default -p buildMode=release`(BUILD SUCCESSFUL 33 tasks)→ unsigned `entry-default-unsigned.hap` 14,301,541 字节,SHA256 `D365416D179A932F2A52EFB1FF43DC5E13E405BC1E0E3DD6CF6E66B7DDFEA934` → sign-app(`-compatibleVersion=60101024`,AGC 通用证书 Release Profile)→ `dist/NekoBox-2.1.6-signed.hap` **14,352,818 字节,SHA256 `E41035952E75F4F20E2F4BDE8CB5C782FF4C63FD74AC17262FA4BA505E0F80A8`**。`assembleApp --mode project ... release`(BUILD SUCCESSFUL 42 tasks)→ 官方 unsigned .app 13,620,986 字节(pack.info 873 B)→ 解包 + 内层 HAP 带 `-compatibleVersion=60101024` 重签(14,352,824 字节)+ `ZipFile.CreateFromDirectory`(includeBaseDirectory=false)重打 + 签外壳 → `dist/NekoBox-2.1.6-signed.app` **13,672,245 字节,SHA256 `AD5D513079C93A9A26F2FF19D2EE14BC3FD36DDBD7A737D730B01B08BD94A158`**;两层 `verify-app` 均 `Verify success`(外壳 block count 2 + Digest true,内层 block count 3 + codesign 三 .so + permission sign)。
 - 静态取证: 交付 HAP 的 `ets/modules.abc`(SHA256 `9364F710B5E6DED9FB4C077FF40860E7A0E0799036647974D7146F79106C5DC1`)含 `routeSettingsCard`/`persistSettings`/`downloadSingleGeo`/`confirmDeleteGeo`/`geoOk`/`settingsExpanded`/`clashApiHeaders`;`resources.index` 含 `route_settings_title`/`route_settings_hint`/`route_builtin_geo_desc`;`libsingbox.so` 未重编(与 `entry/libs/arm64-v8a/libsingbox.so` 同哈希 `9B2B9839...8D49`)。
 - 未验证项: 无真机安装与像素验收(合并后路由页折叠卡的观感、设置页删减后的空档、版本号在系统应用信息里的显示);`route_settings_hint` 等文案仅中英双语。
+
+## 2026-11-15 测速并发/结果落库 + 订阅更新保留延迟与流量 + 分组页签持久化(0.5.58)
+
+用户报障三条:① 正在 TCPing 时点 URL Test,**直接提示"已完成"**;② 有时候进软件,节点上的**延迟与流量(速度)数据丢了**;③ 在 A 分组、选中节点也在 A,**重进软件却回到第 1 个分组**。
+
+### ① 测速"没跑也说完成"(根因是状态机 + 调用方瞎猜)
+
+- 旧链路:菜单 → `patchSettings(latencyTestMode)` → **await** → `testLatency(list)` → `.then(() => toast('URL Test 完成'))`。
+  改设置那次 await 之后,第一轮已经跑起来了,第二次请求被 `if (this.testing) return` **静默吞掉**;
+  而 `.then()` 照样执行 ⇒ 弹「URL Test 完成」。同时 `latencyTestMode` 被改成 url,等于"这轮跑 TCPing、设置里写 URL"。
+- 现在:`AppState.testLatency(targets, mode)` —— **模式作为参数传下去**,不再先改全局设置;
+  返回 `LatencyTestOutcome`(`ran / busy / urlMode / ok / total / degraded / degradeReason / bindFallback / reason`),
+  调用方**必须**依据 `ran` 决定提示什么(`ran=false` 一律不许说"完成")。
+- 被并发挡下时的提示带上下文:「正在 TCPing(还剩 N 个节点),请等它结束」;页头副标题在测速期间显示「URL Test 测速中 3/20」。
+- 结果提示也从"完成"改成「URL Test 完成:可用 18/20」;URL Test 降级成 TCPing、绑定网卡全红后去绑定重测,都会在提示里点明,不再只写日志。
+- `LatencyTester`: `testProfiles()` 现在返回 `LatencyPassCount(ok/total)`;`LatencyRunReport` 增 `ok/total`;
+  新增导出 `LatencyTestOutcome`(UI 与 AppState 共用的结果口径)。
+
+### ② 延迟/流量数据丢失(两条确定性根因 + 一条并发覆盖)
+
+- **根因 A:订阅更新把运行期数据清零**。`updateSubscription` 是"删掉本订阅全部节点 → 按最新内容重新落",
+  新节点是全新的 `Profile` 对象 ⇒ `latencyMs/latencyTestedAt/rx/tx/pinned/sortOrder` 全归零。
+  而**启动时只要有订阅到期就会自动更新一次**(`EntryAbility.updateDueSubscriptionsInBackground`),
+  于是"一进软件,昨天测好的延迟和流量就没了"。
+  现在更新时按 `profileIdentity`(精确)与新增的 `runtimeCarryKey`(类型+服务器+端口+凭据,机场改名字也能认)两级
+  把旧值搬到新节点(`carryRuntimeData`);**落库前再用磁盘上最新一份刷新一次**,避免 fetch 期间刚测出的结果被旧快照覆盖。
+- **根因 B:整表覆盖写**。`testLatency` 结束时 `saveProfiles(this.profiles)` 用内存旧快照整表覆盖:
+  测一整组要几十秒,期间订阅更新/会话流量统计写进库的东西会被这份旧快照冲掉(延迟保住了、流量与新节点丢了)。
+  现在按 1.2s 节流把结果分批交给 `mutateProfiles` 的串行读改写队列,**只改 `latencyMs/latencyTestedAt` 两列**;
+  出错/被打断时 `finally` 里也会把已测到的结果落库(以前整轮白测)。
+  同类整表覆盖一并改掉:`clearTrafficStats` / `clearTestResults`(按 id 只改目标列;清测速结果时同时丢掉未落库的批次);
+  编辑节点保存时**磁盘上的** `latencyMs/latencyTestedAt/rx/tx` 优先(编辑页没有这两组输入框,拿旧快照覆盖就会抹掉新数据)。
+- **根因 C:启动期两条写路径抢跑**。`EntryAbility.updateDueSubscriptionsInBackground()` 原来自己
+  `initStore + loadSettings` 直接开工,与 `Bootstrap.ensureInit()` 并行读/写同一份节点表,谁后写谁赢。
+  现在先 `await AppState.get().ensureInit()`,再判断/执行自动更新。
+- **附带(流量与连接状态)**:扩展进程断开时会把本次会话流量累加进节点记录,现在 `doTeardown` 会**等这笔写完再发 `disconnected`**;
+  UI 侧收到"刚断开"时重读一次节点表 ⇒ 节点卡上的 ↑tx ↓rx 立刻是最新值,不再停在旧数。
+  另外流量事件现在同时带上 `running/profileId`:**UI 进程被系统回收后重开、而隧道一直在跑**时,
+  `VpnRuntime` 原本是全新的"未连接",首页会显示未连接、速率一直 0(要等下一次连接/切换才纠正);
+  现在每秒一条的流量事件就能把会话状态补回来。会话结束那条带 `running=false`,不会把"刚断开"又当"还在连"。
+
+### ③ 分组页签不记忆(真源放错层)
+
+- 页签下标原来只活在 `ProfilesPage` 的 `@Local groupIndex`:切到「设置」再切回来(组件重建)、或重启软件,一律回第 1 个分组。
+- 现在真源是 `AppState.selectedGroupId`(**按分组 id**,不是下标 —— 分组增删/排序后下标必然错位),落盘键 `selected_group_id`;
+  `ensureInit` 里 `restoreSelectedGroup()` 恢复:偏好里的 id 还在就用它 → 否则跟当前选中节点所在分组 → 都没有才交给页面按第 1 个显示。
+  分组被删时 `reloadData` 会自动纠正,`selectGroupById` 对不存在的 id 直接忽略。
+- 页面侧 `alignGroupIndex()` 把 id 映射成下标;`consumePendingGroup`(导入/订阅落地)也一并写回真源。
+- ⚠️ 首帧陷阱:分组数从 0 变 n 时 TabContent 还没建好,此刻 `changeIndex` 越界被忽略 ⇒ Tabs 自己停在 0,
+  这正是"重进软件回到第 1 个"的另一半原因。现在分组数变化时**延后一帧**(一次性 `setTimeout`,页面销毁时 clearTimeout)
+  再 `realignTabsToSelectedGroup()`;**Tabs 仍然只给 controller、不给 `index`**(带 index 每次重建都强制跳页,会把切分组的平移动画吃掉);
+  `Tabs.onChange` **不再**把 index 写回真源(首帧的 0 会把恢复的分组覆盖掉),只在"与真源不一致"时把页签拉回真源那页。
+
+### 顺带修的小问题
+
+- 底部状态卡的刷新按钮:未连接时点它重新载入数据,提示原来是「已复制」(复制粘贴事故),改成「已刷新」。
+
+### 改动文件
+
+- `entry/src/main/ets/utils/LatencyTester.ets`(结果口径 `LatencyPassCount`/`LatencyTestOutcome`/`LatencyRunReport.ok|total`)
+- `entry/src/main/ets/core/AppState.ets`(测速状态机、延迟分批落库、分组页签真源、字段级写盘、断线后重读统计)
+- `entry/src/main/ets/core/Subscriptions.ets`(`runtimeCarryKey`/`carryRuntimeData` + 落库前二次刷新)
+- `entry/src/main/ets/ui/neko/ProfilesPage.ets`(测速入口与提示、页签对齐/恢复、页头进度、刷新文案)
+- `entry/src/main/ets/entryability/EntryAbility.ets`(启动顺序:先 `ensureInit` 再自动更新订阅)
+- `entry/src/main/ets/vpnext/VpnExtAbility.ets`(会话流量落库完成后再发 `disconnected`)
+- `tools/check-state-chain.cjs`(自检 56 → **69 项**,新增 13 条:并发测速被拒/双击同一入口不起两轮/通过数回报/TCPing 归属、页签冷启动恢复/切页落盘/失效 id 忽略、订阅接力运行期数据、延迟字段级落盘、编辑保留磁盘运行期列、流量事件补回会话状态(且会话结束那条不会误判);并把 `typescript` 改为可用本地路径/`TS_LIB` 覆盖)
+- `hvigor/hvigor-config.json5`(dependencies 清空:原来写死作者 Windows 机 `file:D:/command-line-tools/...`,在 Linux 构建机上 Install 到不存在的目录 ⇒ `00308003 workspace/node_modules/@ohos/hvigor/bin/hvigor.js` ENOENT)
+- `AppScope/app.json5`(0.5.57 → **0.5.58** / 500058)
+
+### 验证
+
+- `node tools/check-state-chain.cjs`:**69/69 PASS**(含 13 条新增,多数为行为级:并发测速被拒、双击同一入口不起两轮、通过数回报、页签冷启动恢复/切页落盘、流量事件补状态)。
+- 构建:`/root/command-line-tools/bin/hvigorw assembleHap --mode module -p product=default -p buildMode=debug --no-daemon` → **BUILD SUCCESSFUL**,unsigned HAP 16,348,651 字节,
+  SHA256 `A6EA94D917EB17EAAF22F0344F49D8C17A2CADEF06DE6804F3D9CD7704838D7B`。
+- 产物内取证:`module.json` = `0.5.58 / 500058 / minAPIVersion 60101024 / compileSdk 26.0.1.120`;
+  `ets/modules.abc` 含 `selected_group_id` / `realignTabsToSelectedGroup` / `LatencyTestOutcome` / `carryRuntimeData`。
+- **未上机**(本机无 hdc 设备、无 KVM):三条修复均属"事件顺序 + 写盘口径"类,源码级与主机逻辑级已覆盖,
+  真机仍需回归:TCPing 中途点 URL Test 的提示、重启后页签与选中的节点分组一致、订阅更新后延迟/流量还在。
+
+### 已知遗留(明确不在本轮范围)
+
+- **并发测速是"拒绝"而不是"抢占"**:正在跑的那轮不会被打断。若用户更希望"点新的一定跑新的",需要给 tester 加协作式取消令牌(worker 逐节点检查 + 测速内核 stop),风险面更大,留待用户确认后单独做。
+- **两份首选项(nodes/groups/settings)在多进程下的可见性**:`:vpn` 扩展进程与 UI 进程共用 `nekobox_store`(默认 XML 存储)。官方文档明确 XML 模式**不支持多进程并发**,GSKV 模式才支持;本轮没做存储层迁移(需要一次性读旧写新 + 回读校验,且本机无法真机验证),只在业务层把"整表覆盖"全改成"字段级读改写"来缩小爆炸半径。
+  若后续仍观察到"设置/节点整批丢失",优先按 `RzdDocs/memory/全局记忆.md` 的思路切 GSKV 并保留 XML 作回退。

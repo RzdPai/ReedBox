@@ -18,6 +18,8 @@ Validation: source/host logic only. ArkUI decorators are stripped for the mock h
 - PASS: Runtime status reaches AppState mirror fields and page listeners
 - PASS: Traffic samples mirror into the @Trace fields users read
 - PASS: Disconnect clears the mirror so the home page shows 未连接
+- PASS: A session-end traffic event never revives a stopped tunnel
+- PASS: Traffic events revive a restarted UI process while the tunnel keeps running
 - PASS: Settings callback sees the committed new value
 - PASS: Cold start restores the persisted selection instead of the first row
 - PASS: Importing while a group is selected files the nodes into that group
@@ -57,4 +59,15 @@ Validation: source/host logic only. ArkUI decorators are stripped for the mock h
 - PASS: Row model keeps identity while selected state flips (list refresh contract)
 - PASS: Hand-awareness default-off migration runs exactly once
 - PASS: PageHeader cancels stale hand-change animations (source-level guard)
+- PASS: A second latency run is refused with a reason instead of being reported as complete
+- PASS: The finished run reports how many nodes actually answered
+- PASS: TCPing runs report their own pass count without touching the URL Test path
+- PASS: Double-tapping a test entry cannot start two runs while the mode is being saved
+- PASS: The first tap still completes and records the chosen mode
+- PASS: Cold start restores the group tab the user was on, not the first group
+- PASS: Switching group tabs persists the group id for the next launch
+- PASS: A tab pointing at a deleted group is ignored instead of blanking the list
+- PASS: A subscription refresh carries latency and traffic onto the rebuilt nodes
+- PASS: Latency tests persist field-by-field instead of replacing the whole profile table
+- PASS: Editing a node keeps the runtime columns already on disk
 - PASS: All ETS sources meet the V2 and Navigation constraints

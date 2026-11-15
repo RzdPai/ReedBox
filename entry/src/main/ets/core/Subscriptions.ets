@@ -258,6 +258,27 @@ function profileIdentity(p: Profile, url: string): string {
     p.path, p.host, p.serviceName, p.sni].join('\u001f');
 }
 
+/**
+ * "同一条线路"的粗判据（比 profileIdentity 宽松）：不含节点名，也不含传输层细节。
+ * 用途只有一个 —— 订阅更新时**把上一轮的运行期数据带到新节点上**：
+ * 机场经常改名（"香港01"→"HK-01"），改名就会换 id；只按 identity 匹配的话，
+ * 一次改名就让测速结果和历史流量全清零。
+ */
+function runtimeCarryKey(p: Profile): string {
+  const auth: string = p.uuid.length > 0 ? p.uuid : `${p.password}\u001f${p.method}`;
+  return [p.type, p.server, `${p.serverPort}`, auth].join('\u001f');
+}
+
+/** 把旧节点的运行期数据（延迟/流量/置顶/组内顺序）搬到新节点上 */
+function carryRuntimeData(target: Profile, previous: Profile): void {
+  target.latencyMs = previous.latencyMs;
+  target.latencyTestedAt = previous.latencyTestedAt;
+  target.rx = previous.rx;
+  target.tx = previous.tx;
+  target.pinned = previous.pinned;
+  target.sortOrder = previous.sortOrder;
+}
+
 function stableProfileId(p: Profile, url: string): string {
   const value = profileIdentity(p, url);
   let hash = 2166136261;
@@ -507,6 +528,25 @@ export async function updateSubscription(url: string): Promise<SubUpdateResult> 
     ? profileIdentity(selectedProfile, url) : '';
   let migratedSelectedId = '';
 
+  /**
+   * ★ 运行期数据的接力表（甲方 2026-11-15："有时候进入软件时延迟和速度数据会丢失"）。
+   * 订阅更新是"删掉本订阅全部节点 → 按最新内容重新落"，新节点是全新的 Profile 对象，
+   * `latencyMs / latencyTestedAt / rx / tx / pinned / sortOrder` 全归零 ——
+   * 而启动时只要有订阅到期就会自动更新一次，于是"一进软件，昨天测好的延迟和流量就没了"。
+   * 这里按 identity（精确）与 runtimeCarryKey（改名也能认）两级把旧值搬过来。
+   */
+  const carryByIdentity: Record<string, Profile> = {};
+  const carryByRuntime: Record<string, Profile> = {};
+  for (const p of existing) {
+    if (p.subUrl !== url) {
+      continue;
+    }
+    carryByIdentity[profileIdentity(p, url)] = p;
+    const key: string = runtimeCarryKey(p);
+    if (carryByRuntime[key] === undefined) {
+      carryByRuntime[key] = p;
+    }
+  }
   const kept: Array<Profile> = [];
   let removed = 0;
   let runningIdentity = '';
@@ -544,6 +584,12 @@ export async function updateSubscription(url: string): Promise<SubUpdateResult> 
     if (kept.some((item: Profile) => item.id === p.id)) {
       p.id = `${p.id}_${added}`;
     }
+    const exact: Profile | undefined = carryByIdentity[profileIdentity(p, url)];
+    const fuzzy: Profile | undefined = exact !== undefined
+      ? exact : carryByRuntime[runtimeCarryKey(p)];
+    if (fuzzy !== undefined) {
+      carryRuntimeData(p, fuzzy);
+    }
     p.updatedAt = Date.now();
     kept.push(p);
     if (selectedIdentity.length > 0 && profileIdentity(p, url) === selectedIdentity) {
@@ -552,6 +598,38 @@ export async function updateSubscription(url: string): Promise<SubUpdateResult> 
     added++;
   }
   resolveDialerProxies(parsed, kept);
+  /**
+   * 落库前再用**磁盘上最新的一份**刷新运行期数据：
+   * 一次订阅更新要下载 + 解析，可能耗时几秒，期间测速结果/会话流量统计刚写进库，
+   * 拿 fetch 开始时的快照整表写回去就会把它们抹掉（"测完延迟一更新订阅就没了"）。
+   */
+  try {
+    const latest: Array<Profile> = await loadProfiles();
+    const freshByIdentity: Record<string, Profile> = {};
+    const freshByRuntime: Record<string, Profile> = {};
+    for (const item of latest) {
+      if (item.subUrl !== url) {
+        continue;
+      }
+      freshByIdentity[profileIdentity(item, url)] = item;
+      const key: string = runtimeCarryKey(item);
+      if (freshByRuntime[key] === undefined) {
+        freshByRuntime[key] = item;
+      }
+    }
+    for (const item of kept) {
+      if (item.subUrl !== url) {
+        continue;
+      }
+      const fresh: Profile | undefined = freshByIdentity[profileIdentity(item, url)]
+        ?? freshByRuntime[runtimeCarryKey(item)];
+      if (fresh !== undefined) {
+        carryRuntimeData(item, fresh);
+      }
+    }
+  } catch (e) {
+    LogStore.addLog(`[sub] 刷新运行期数据失败(按已有结果落库): ${e}`);
+  }
   await saveProfiles(kept);
   /**
    * ★★★ 订阅里的 Clash `proxy-groups` **一律不导入**（甲方 2026-11-01 明确：不要 Clash 那套分组，

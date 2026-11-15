@@ -11,6 +11,7 @@ import { ProfileCard } from './ProfileCard';
 import { ProfileRowModel } from './ProfileRowSource';
 import { SubInfo } from '../../core/Subscriptions';
 import { exportProfileLink } from '../../utils/LinkExporter';
+import { LatencyTestOutcome } from '../../utils/LatencyTester';
 import { buildOutboundJson } from '../../core/ConfigBuilder';
 import { getClipboardText, setClipboardText } from '../../utils/ClipboardHelper';
 import {
@@ -231,9 +232,24 @@ export struct ProfilesPage {
     this.groupCount = this.app.groups.length;
     this.groupItems = this.groupLabels();
     this.consumePendingGroup();
-    this.groupIndex = this.effectiveGroupIndex();
+    this.alignGroupIndex();
     // 分组被删/新增后把系统 Tabs 对齐到当前页（不绑 index，靠控制器切，才保住系统切换动画）
-    if (this.tabsIndex !== this.groupIndex) {
+    const groupsChanged: boolean = this.tabsGroupCount !== this.app.groups.length;
+    this.tabsGroupCount = this.app.groups.length;
+    if (groupsChanged) {
+      /**
+       * TabContent 的数量刚变（0 → n）时**本帧子节点还没建好**，此刻 changeIndex 越界会被忽略
+       * ⇒ Tabs 自己停在 index 0，表现就是"重进软件/刚加载完回到第 1 个分组"。
+       * 延后一帧再对齐（一次性，不是轮询）。
+       */
+      if (this.realignTimer >= 0) {
+        clearTimeout(this.realignTimer);
+      }
+      this.realignTimer = setTimeout((): void => {
+        this.realignTimer = -1;
+        this.realignTabsToSelectedGroup();
+      }, 0);
+    } else if (this.tabsIndex !== this.groupIndex) {
       this.tabsController.changeIndex(this.groupIndex);
       this.tabsIndex = this.groupIndex;
     }
@@ -250,9 +266,61 @@ export struct ProfilesPage {
       if (this.app.groups[i].id === pending) {
         this.groupIndex = i;
         this.app.pendingGroupId = '';
+        // 导入/订阅落地要切过去的那一组，也是用户"当前所在分组"⇒ 一起写进真源并落盘
+        this.app.selectGroupById(pending);
         return;
       }
     }
+  }
+
+  /** 分组 id → 页签下标；找不到返回 -1（分组被删/还没加载） */
+  private indexForGroup(groupId: string): number {
+    if (groupId.length === 0) {
+      return -1;
+    }
+    for (let i = 0; i < this.app.groups.length; i++) {
+      if (this.app.groups[i].id === groupId) {
+        return i;
+      }
+    }
+    return -1;
+  }
+
+  /**
+   * 把系统 Tabs 对齐到真源那一页（分组增删后 TabContent 子节点重建，必须等布局完成再 changeIndex）。
+   * 只在"分组数量刚变"时由一次性定时器调用，不参与轮询。
+   */
+  private realignTabsToSelectedGroup(): void {
+    const targetIndex: number = this.indexForGroup(this.app.selectedGroupId);
+    if (targetIndex >= 0) {
+      this.groupIndex = targetIndex;
+    }
+    if (this.tabsIndex !== this.groupIndex) {
+      this.tabsController.changeIndex(this.groupIndex);
+      this.tabsIndex = this.groupIndex;
+    }
+    this.syncVisibleRows();
+  }
+
+  /**
+   * 页签下标跟着 `AppState.selectedGroupId` 走。
+   * ⚠️ 以前下标只活在 `@Local groupIndex` 里：切到「设置」再切回来（组件重建）或重启软件，
+   *   一律回到第 1 个分组（甲方 2026-11-15：在 A 分组、选中节点也在 A，重进却跳到第 1 个）。
+   *   真源现在在 AppState（按 **id** 保存），页面只负责映射成下标。
+   */
+  private alignGroupIndex(): void {
+    const targetId: string = this.app.selectedGroupId;
+    if (targetId.length > 0) {
+      for (let i = 0; i < this.app.groups.length; i++) {
+        if (this.app.groups[i].id === targetId) {
+          this.groupIndex = i;
+          return;
+        }
+      }
+      this.groupIndex = 0;
+      return;
+    }
+    this.groupIndex = this.effectiveGroupIndex();
   }
 
   private syncVisibleRows(): void {
@@ -335,20 +403,28 @@ export struct ProfilesPage {
       return;
     }
     hilog.info(DOMAIN, TAG, '[profiles-tab] switch to=%{public}d', index);
-    this.groupIndex = index;
-    this.tabsController.changeIndex(index);
+    this.selectGroup(index);
   }
 
+  /**
+   * 点分组页签：① 写 AppState（按 id 落盘，重进软件/重建组件都能回到这一组）；
+   * ② 让系统 Tabs 切到这一页；③ 该分组自己的 Scroll 回到顶部。
+   */
   private selectGroup(index: number): void {
     const group: ProfileGroup | undefined = this.app.groups[index];
+    if (group === undefined) {
+      return;
+    }
     hilog.info(DOMAIN, TAG, '[profiles-tab] select index=%{public}d group=%{public}s nodes=%{public}d',
-      index, group === undefined ? '-' : group.id,
-      group === undefined ? 0 : this.app.groupNodeCount(group.id));
+      index, group.id, this.app.groupNodeCount(group.id));
     this.groupIndex = index;
+    this.app.selectGroupById(group.id);
+    this.tabsController.changeIndex(index);
+    this.tabsIndex = index;
     this.syncVisibleRows();
     // 该分组自己的 Scroll 回到顶部（每页一个 Scroller）
     try {
-      this.scrollerFor(group === undefined ? '' : group.id).scrollEdge(Edge.Top);
+      this.scrollerFor(group.id).scrollEdge(Edge.Top);
     } catch (e) {
       // 列表还没挂上 scroller 时忽略
     }
@@ -356,6 +432,10 @@ export struct ProfilesPage {
 
   private tabsController: TabsController = new TabsController();
   private tabsIndex: number = 0;
+  /** 上一次同步时看到的分组数（判断 TabContent 子节点是否刚重建过） */
+  private tabsGroupCount: number = 0;
+  /** 延后一帧对齐页签用的定时器（页面销毁时要清掉，别对已卸载的 Tabs 调 changeIndex） */
+  private realignTimer: number = -1;
   private pageScrollers: Map<string, Scroller> = new Map<string, Scroller>();
 
   private scrollerFor(key: string): Scroller {
@@ -562,37 +642,47 @@ export struct ProfilesPage {
   }
 
   private testTcp(): void {
-    const list: Array<Profile> = this.filtered();
-    if (list.length === 0) {
-      this.toast('没有可测速的节点');
-      return;
-    }
-    this.app.patchSettings((s) => {
-      s.latencyTestMode = 'tcp';
-    }).then(() => {
-      this.app.testLatency(list).then(() => {
-        this.toast('TCPing 完成');
-      }).catch((e: Error) => {
-        this.toast(`测速失败：${e.message}`);
-      });
-    });
+    this.runTest('tcp');
   }
 
   private testUrl(): void {
+    this.runTest('url');
+  }
+
+  /**
+   * 统一的测速入口：**模式作为参数往下传**，不再"先去改全局设置再跑"。
+   * 原来的写法有两个后果：改设置的那次 await 之后正在跑的那轮已经起来，
+   * 第二次点击又被 AppState 的 `testing` 静默吞掉，调用方照旧弹「完成」
+   * —— 甲方 2026-11-15 报的"TCPing 还没完就点 URL Test，直接提示已完成"。
+   */
+  private runTest(mode: string): void {
     const list: Array<Profile> = this.filtered();
     if (list.length === 0) {
       this.toast('没有可测速的节点');
       return;
     }
-    this.app.patchSettings((s) => {
-      s.latencyTestMode = 'url';
-    }).then(() => {
-      this.app.testLatency(list).then(() => {
-        this.toast('URL Test 完成');
-      }).catch((e: Error) => {
-        this.toast(`测速失败：${e.message}`);
-      });
+    this.app.testLatency(list, mode).then((outcome: LatencyTestOutcome) => {
+      this.toastOutcome(outcome);
+    }).catch((e: Error) => {
+      this.toast(`测速失败：${e.message}`);
     });
+  }
+
+  /** 结果怎么提示：没跑要说清为什么，跑了要说清通过几个 */
+  private toastOutcome(outcome: LatencyTestOutcome): void {
+    if (!outcome.ran) {
+      this.toast(outcome.reason.length > 0 ? outcome.reason : '测速未执行');
+      return;
+    }
+    const label: string = outcome.urlMode ? 'URL Test' : 'TCPing';
+    const summary: string = `${label} 完成：可用 ${outcome.ok}/${outcome.total}`;
+    if (outcome.bindFallback) {
+      this.toast(`${summary}（绑定网卡失败已去掉绑定重测，结果仅供参考）`);
+    } else if (outcome.degraded) {
+      this.toast(`${summary}（已降级为握手测试：${outcome.degradeReason}）`);
+    } else {
+      this.toast(summary);
+    }
   }
 
   private async scanQr(): Promise<void> {
@@ -647,7 +737,12 @@ export struct ProfilesPage {
     ];
     this.menu.open(this.getUIContext(), `profile_more_${p.id}`, items, (index: number) => {
       if (index === R_TEST) {
-        this.app.testLatency([p]).catch((e: Error) => {
+        this.app.testLatency([p]).then((outcome: LatencyTestOutcome) => {
+          // 单节点测速的成功结果直接看卡片上的毫秒数；只有被并发请求挡下来才需要提示
+          if (!outcome.ran && outcome.reason.length > 0) {
+            this.toast(outcome.reason);
+          }
+        }).catch((e: Error) => {
           this.toast(`测速失败：${e.message}`);
         });
       } else if (index === R_PIN) {
@@ -1005,7 +1100,7 @@ export struct ProfilesPage {
         await this.app.reconnect();
       } else {
         await this.app.reloadData();
-        this.toast('已复制');
+        this.toast('已刷新');
       }
     } catch (e) {
       this.toast(`操作失败：${(e as Error).message}`);
@@ -1140,6 +1235,10 @@ export struct ProfilesPage {
     this.app.unsubscribe(this.onBusinessChanged);
     this.runtime.unsubscribe(this.onRuntimeChanged);
     this.stateSubscribed = false;
+    if (this.realignTimer >= 0) {
+      clearTimeout(this.realignTimer);
+      this.realignTimer = -1;
+    }
   }
 
   private onBusinessChanged = (): void => {
@@ -1218,7 +1317,9 @@ export struct ProfilesPage {
       Column() {
         PageHeader({
           title: 'NekoBox',
-          subtitle: this.profileCount === 0 ? '还没有配置' : `${this.profileCount} 个配置 · ${this.groupCount} 个分组`,
+          subtitle: this.app.testing
+            ? `${this.app.testLabel} 测速中 ${this.app.testDone}/${this.app.testTotal}`
+            : (this.profileCount === 0 ? '还没有配置' : `${this.profileCount} 个配置 · ${this.groupCount} 个分组`),
 
           showSearch: true,
           showAdd: true,
@@ -1289,6 +1390,9 @@ export struct ProfilesPage {
       }
 
       // 每个分组 = 一个 TabContent；切换动画交给系统 Tabs（不自己写 translate/animateTo）
+      // ⚠️ 这里刻意**不带 index**（只给 controller）：带 index 等于每次重建都强制跳页，
+      // 会把"切分组的平移动画"吃掉；首帧要落到恢复的分组，靠 syncBusinessView 里的
+      // realignTabsToSelectedGroup()（延后一帧、子节点建好后）来对齐。
       Tabs({ barPosition: BarPosition.Start, controller: this.tabsController }) {
         if (this.app.groups.length === 0) {
           TabContent() {
@@ -1308,11 +1412,24 @@ export struct ProfilesPage {
       .animationDuration(240)
       .scrollable(false)
       .onChange((index: number) => {
-        // 点页签时 switchGroup 会先把 groupIndex 写掉，这里**不能**因为相等就跳过同步：
+        // 点页签时 selectGroup 会先把 groupIndex 写掉，这里**不能**因为相等就跳过同步：
         // 系统回调才是「这一页真的到位」的唯一信号，行模型/计数都按它重算一次。
         const changed: boolean = index !== this.groupIndex || index !== this.tabsIndex;
         this.tabsIndex = index;
         this.groupIndex = index;
+        /**
+         * ⚠️ 这里**不要**把 index 写回 AppState/偏好：首帧 Tabs 会先落到第 0 页
+         * （分组列表当时还没建好），拿它当真源就会把"上次停在第 3 个分组"覆盖成第 1 个。
+         * 反过来：真源里记着别的分组而系统回调报了个不一样的页，说明是布局时序问题，
+         * 立刻把页签拉回真源那页（用户点页签的路径先写真源再切页，不会走到这里）。
+         */
+        const targetId: string = this.app.selectedGroupId;
+        const targetIndex: number = this.indexForGroup(targetId);
+        if (targetIndex >= 0 && targetIndex !== index) {
+          this.groupIndex = targetIndex;
+          this.tabsIndex = targetIndex;
+          this.tabsController.changeIndex(targetIndex);
+        }
         this.syncVisibleRows();
         if (changed) {
           hilog.info(DOMAIN, TAG, '[profiles-tab] onChange index=%{public}d', index);

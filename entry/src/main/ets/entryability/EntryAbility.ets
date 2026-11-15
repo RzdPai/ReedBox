@@ -14,9 +14,10 @@ import wantAgent from '@ohos.app.ability.wantAgent';
 import { initStore, loadSettings, LogStore } from '../model/Store';
 import { publishAppForeground, subscribeVpnEvents, unsubscribeVpnEvents } from '../core/VpnIpc';
 import { VpnService } from '../core/VpnService';
-import { markSubFailure, markSubSuccess, needAutoUpdate, setAppContext, updateSubscription } from '../core/Subscriptions';
+import { markSubFailure, markSubSuccess, needAutoUpdate, updateSubscription } from '../core/Subscriptions';
 import { subErrorText } from '../utils/Subscription';
 import { AppState } from '../core/AppState';
+import { AppSettings } from '../model/Profile';
 import { VpnRuntime } from '../core/VpnRuntime';
 
 /**
@@ -101,9 +102,16 @@ export default class EntryAbility extends UIAbility {
     this.backgroundUpdating = true;
     let backgroundRunning: boolean = false;
     try {
-      await initStore(this.context);
-      setAppContext(this.context);
-      const settings = await loadSettings();
+      /**
+       * ★ 先让状态层把数据初始化完，再谈"自动更新订阅"。
+       * 这里原来是自己 `initStore + loadSettings` 直接开工，和 `Bootstrap.ensureInit()`
+       * 并行读/写同一份节点表（reloadData 里的 applySelection、孤儿归组都会写），
+       * 谁后写谁赢 —— 表现就是"有时候进软件，节点上的延迟/流量是空的"。
+       */
+      const state: AppState = AppState.get();
+      state.attachContext(this.context);
+      await state.ensureInit();
+      const settings: AppSettings = state.settings;
       if (!settings.autoUpdateSubs) {
         return;
       }
@@ -274,9 +282,11 @@ export default class EntryAbility extends UIAbility {
     }, (status: string, running: boolean, profileId: string) => {
       const current: AppState = AppState.get();
       current.applyVpnStatus(status, running, profileId);
-    }, (upSpeed: number, downSpeed: number, totalUp: number, totalDown: number) => {
+    }, (upSpeed: number, downSpeed: number, totalUp: number, totalDown: number,
+      running: boolean, profileId: string) => {
       const current: AppState = AppState.get();
-      current.applyTraffic(upSpeed, downSpeed, totalUp, totalDown);
+      // 流量事件带着会话状态(见 AppState.applyTraffic):UI 进程新起时靠它把"已连接"补回来
+      current.applyTraffic(upSpeed, downSpeed, totalUp, totalDown, running, profileId);
     });
   }
 

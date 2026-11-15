@@ -28,7 +28,13 @@ import {
 import { VpnService } from './VpnService';
 import { parseShareText } from '../utils/LinkParser';
 import { subErrorText } from '../utils/Subscription';
-import { testProfiles, urlTestProfiles } from '../utils/LatencyTester';
+import {
+  LatencyPassCount,
+  LatencyRunReport,
+  LatencyTestOutcome,
+  testProfiles,
+  urlTestProfiles
+} from '../utils/LatencyTester';
 import { downloadGeoAsset } from '../utils/GeoAssets';
 import { VpnRuntime } from './VpnRuntime';
 import { Accent } from '../ui/Accent';
@@ -72,11 +78,14 @@ export class AppState {
   @Trace totalDown: number = 0;
   @Trace connectedAt: number = 0;
   private runtimeSubscribed: boolean = false;
+  /** 上一次镜像到的"是否在跑"，用来识别"刚断开"这个时刻（见 syncRuntimeMirror） */
+  private mirroredRunning: boolean = false;
   private onRuntimeChanged = (): void => {
     this.syncRuntimeMirror();
   };
 
   private syncRuntimeMirror(): void {
+    const wasRunning: boolean = this.mirroredRunning;
     this.vpnRunning = this.runtime.vpnRunning;
     this.vpnStatus = this.runtime.vpnStatus;
     this.runningProfileId = this.runtime.runningProfileId;
@@ -85,6 +94,14 @@ export class AppState {
     this.totalUp = this.runtime.totalUp;
     this.totalDown = this.runtime.totalDown;
     this.connectedAt = this.runtime.connectedAt;
+    this.mirroredRunning = this.vpnRunning;
+    if (wasRunning && !this.vpnRunning && this.ready) {
+      // 断开时扩展进程会把本次会话流量累加进节点记录（profileTrafficStatistics）：
+      // 重新读一次，节点卡上的 ↑tx ↓rx 才是最新值，而不是上次启动时的旧数。
+      this.reloadProfiles().catch((e: Error): void => {
+        this.log(`[ui] 断线后重读节点统计失败：${e.message}`);
+      });
+    }
     this.bump();
   }
 
@@ -100,6 +117,14 @@ export class AppState {
   @Trace selectedId: string = '';
   /** 请求首页切到某个分组页签（导入落地后由页面消费并清空） */
   @Trace pendingGroupId: string = '';
+  /**
+   * 首页当前分组页签（真源）。
+   * ⚠️ 以前这是 `ProfilesPage` 的 `@Local groupIndex` —— 组件一重建就归零：
+   *   切到「设置」再切回来、或者重启软件，都会从 A 分组跳回第 1 个分组
+   *   （甲方 2026-11-15 反馈）。现在按 **分组 id** 存在这里并落盘，
+   *   页面只负责把它映射成下标（分组增删/排序后下标会变，存下标必然错位）。
+   */
+  @Trace selectedGroupId: string = '';
 
   // ---------------- 交互态 ----------------
   /** Business data revision. Notify only after the complete mutation is committed. */
@@ -123,6 +148,8 @@ export class AppState {
   @Trace testing: boolean = false;
   @Trace testDone: number = 0;
   @Trace testTotal: number = 0;
+  /** 正在跑的那一轮叫什么（'TCPing' / 'URL Test'），并发请求被拒时要靠它说清楚 */
+  @Trace testLabel: string = '';
 
   /** ★ 变更订阅者：任何写操作末尾都会同步回调（页面据此自增 tick 重绘） */
   private listeners: Array<() => void> = [];
@@ -221,12 +248,13 @@ export class AppState {
       await this.repairDuplicateSubGroups();
       await this.adoptOrphans();
       this.applySelection(preferredId);
+      await this.restoreSelectedGroup(this.selectedId);
       // 兜底结果也写回偏好，避免"上次选中被删 → 每次启动都重新猜"。
       await writePrefString('selected_profile_id', this.selectedId);
       this.ready = true;
       this.bump();
       this.log(`[ui] 状态初始化完成：节点 ${this.profiles.length}，分组 ${this.groups.length}，`
-        + `订阅 ${this.subs.length}，选中 ${this.selectedId}`);
+        + `订阅 ${this.subs.length}，选中 ${this.selectedId}，页签 ${this.selectedGroupId}`);
     } catch (e) {
       this.initStarted = false;
       this.bootError = `初始化失败：${(e as Error).message}`;
@@ -312,6 +340,10 @@ export class AppState {
     this.subs = await listSubs();
     this.rules = await loadRouteRules();
     this.remoteSets = await loadRemoteRuleSets();
+    // 分组可能刚被删/改名：页签指向一个不存在的分组时退到"当前选中节点所在的分组"
+    if (this.selectedGroupId.length > 0 && !this.hasGroup(this.selectedGroupId)) {
+      this.selectedGroupId = this.groupOfProfile(this.selectedId);
+    }
     this.applySelection(this.selectedId);
     this.bump();
   }
@@ -356,6 +388,65 @@ export class AppState {
       }
     }
     return this.profiles.length > 0 ? this.profiles[0] : undefined;
+  }
+
+  // ------------------------------------------------------------------ 分组页签
+
+  private hasGroup(groupId: string): boolean {
+    if (groupId.length === 0) {
+      return false;
+    }
+    for (const g of this.groups) {
+      if (g.id === groupId) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** 某个节点所在分组（没有归属/分组已删返回空串） */
+  private groupOfProfile(profileId: string): string {
+    if (profileId.length === 0) {
+      return '';
+    }
+    for (const p of this.profiles) {
+      if (p.id === profileId && this.hasGroup(p.groupId)) {
+        return p.groupId;
+      }
+    }
+    return '';
+  }
+
+  /**
+   * 恢复上次停留的分组页签。
+   * 优先级：偏好里存的 id（分组还存在）→ 当前选中节点所在的分组 → 空串（页面按第 1 个显示）。
+   * 空串是合法结果（没有分组），不要在这里兜底成第 1 个 —— 页面自己能算。
+   */
+  private async restoreSelectedGroup(selectedProfileId: string): Promise<void> {
+    const saved: string = await readPrefString('selected_group_id', '');
+    if (saved.length > 0 && this.hasGroup(saved)) {
+      this.selectedGroupId = saved;
+      return;
+    }
+    this.selectedGroupId = this.groupOfProfile(selectedProfileId);
+  }
+
+  /**
+   * 首页切分组页签：写状态 + 落盘。
+   * 不阻塞点击（写偏好失败只记日志），页面靠 `selectedGroupId` 的回调重绘。
+   */
+  selectGroupById(groupId: string): void {
+    if (groupId.length === 0 || !this.hasGroup(groupId)) {
+      return;
+    }
+    if (this.selectedGroupId === groupId) {
+      return;
+    }
+    this.selectedGroupId = groupId;
+    this.bump();
+    writePrefString('selected_group_id', groupId).catch((e: Error): void => {
+      this.log(`[ui-data] 保存当前分组失败：${e.message}`);
+    });
   }
 
   runningProfile(): Profile | undefined {
@@ -467,47 +558,114 @@ export class AppState {
 
   // ------------------------------------------------------------------ 测速
 
-  /** 对给定节点做延迟测试（URL Test 优先，失败自动退 TCPing，实现见 utils/LatencyTester） */
-  async testLatency(targets: Array<Profile>): Promise<void> {
-    if (targets.length === 0) {
-      this.busyText = '没有可测速的节点';
-      return;
-    }
+  /**
+   * 对给定节点做延迟测试（URL Test 优先，失败自动退 TCPing，实现见 utils/LatencyTester）。
+   *
+   * `mode` 显式传入（'tcp' / 'url'），空串 = 用设置里的测速方式。
+   * ⚠️ 以前是"先 patchSettings 改全局设置，再 await testLatency"：
+   *   ① 改设置那次 await 之后，正在跑的那轮已经起来了，第二次点击又被 `if (this.testing) return`
+   *      静默吞掉，调用方照旧弹「URL Test 完成」—— 甲方 2026-11-15 报的
+   *      "TCPing 还没跑完就点 URL Test，直接提示已完成"就是这个；
+   *   ② 同一时刻把 `latencyTestMode` 改掉，等于"这轮跑 TCPing、设置里写 URL"。
+   * 现在模式只作为参数传进来，跑不跑由 `LatencyTestOutcome` 如实回报：
+   *   `ran=false` 的调用方**不允许**再说"完成"。
+   */
+  async testLatency(targets: Array<Profile>, mode: string = ''): Promise<LatencyTestOutcome> {
+    const outcome: LatencyTestOutcome = new LatencyTestOutcome();
+    const wantedMode: string = mode.length > 0 ? mode : this.settings.latencyTestMode;
+    const ctx: common.UIAbilityContext | undefined = this.context;
+    // URL Test 必须有 UI 进程的 context 来写临时配置/起测速内核；没有就只能 TCPing
+    const urlCtx: common.UIAbilityContext | undefined = wantedMode !== 'tcp' ? ctx : undefined;
+    outcome.urlMode = urlCtx !== undefined;
     if (this.testing) {
-      return;
+      // 并发请求必须说清楚"现在跑的是哪一轮、还剩几个"，不能静默丢弃
+      const left: number = Math.max(0, this.testTotal - this.testDone);
+      const running: string = this.testLabel.length > 0 ? this.testLabel : '测速';
+      outcome.busy = true;
+      outcome.reason = `正在 ${running}${left > 0 ? `（还剩 ${left} 个节点）` : ''}，请等它结束`;
+      this.log(`[test] 忽略并发测速请求：${outcome.reason}`);
+      return outcome;
     }
+    if (targets.length === 0) {
+      outcome.reason = '没有可测速的节点';
+      this.busyText = outcome.reason;
+      return outcome;
+    }
+    // ★ 先占位再 await：`patchSettings` 会落盘（有 await），两次快速点击若都卡在它前面
+    //   就会各起一轮（`testing` 还是 false）—— 这正是"并发测速"最难查的那种残留。
     this.testing = true;
     this.testDone = 0;
     this.testTotal = targets.length;
-    this.busyText = `正在测速 ${targets.length} 个节点…`;
-    const ctx: common.UIAbilityContext | undefined = this.context;
+    this.testLabel = urlCtx !== undefined ? 'URL Test' : 'TCPing';
+    this.busyText = `正在 ${this.testLabel} 测速 ${targets.length} 个节点…`;
+    this.lastLatencyFlushAt = 0;
+    // 记住"上次用的测速方式"（设置页「测速方式」显示的就是它）；只影响下一轮，不影响本轮
+    if (mode.length > 0 && this.settings.latencyTestMode !== mode) {
+      try {
+        await this.patchSettings((s: AppSettings) => {
+          s.latencyTestMode = mode;
+        });
+      } catch (e) {
+        this.log(`[test] 保存测速方式失败：${(e as Error).message}`);
+      }
+    }
     const onResult = (id: string, ms: number): void => {
       this.testDone++;
       this.commitLatency(id, ms);
     };
     try {
-      if (this.settings.latencyTestMode === 'tcp' || ctx === undefined) {
-        await testProfiles(targets, onResult, this.settings.testConcurrent, this.settings.testTimeoutMs,
-          this.settings.testRetries, this.settings.testSamples);
+      if (urlCtx === undefined) {
+        const counts: LatencyPassCount = await testProfiles(targets, onResult, this.settings.testConcurrent,
+          this.settings.testTimeoutMs, this.settings.testRetries, this.settings.testSamples);
+        outcome.ok = counts.ok;
       } else {
-        const report = await urlTestProfiles(targets, this.profiles, this.settings, ctx, onResult,
-          this.settings.testConcurrent, this.groups);
+        const report: LatencyRunReport = await urlTestProfiles(targets, this.profiles, this.settings,
+          urlCtx, onResult, this.settings.testConcurrent, this.groups);
+        outcome.ok = report.ok;
+        outcome.degraded = report.degraded;
+        outcome.degradeReason = report.degradeReason;
+        outcome.bindFallback = report.bindFallback;
         if (report.degraded) {
           this.log(`[ui] URL Test 降级：${report.degradeReason}`);
         }
+        if (report.bindFallback) {
+          this.log('[ui] 绑定物理网卡导致全组失败，已去掉绑定重测（这批结果不可当作测量结论）');
+        }
       }
-      await saveProfiles(this.profiles);
+      outcome.ran = true;
+      outcome.total = targets.length;
+      this.log(`[ui] ${this.testLabel} 结束：可用 ${outcome.ok}/${outcome.total}`);
     } catch (e) {
-      this.busyText = `测速失败：${(e as Error).message}`;
-      this.log(`[ui] 测速失败：${(e as Error).message}`);
+      outcome.reason = `测速失败：${(e as Error).message}`;
+      this.busyText = outcome.reason;
+      this.log(`[ui] ${this.testLabel} 失败：${(e as Error).message}`);
     } finally {
+      // 已测到的结果必须落库：这轮中途出错/被打断也不该让前面的测量白费
+      await this.flushLatency();
       this.testing = false;
       this.testDone = 0;
       this.testTotal = 0;
+      this.testLabel = '';
+      this.busyText = '';
     }
+    return outcome;
   }
 
-  /** 单个节点延迟落库并触发重绘（Profile 不是 @ObservedV2 ⇒ 必须整表替换） */
+  /** 待落库的延迟结果（按节点 id） */
+  private pendingLatency: Map<string, number> = new Map<string, number>();
+  /** 串行写盘队列（与 Store.mutateProfiles 的队列呼应，避免两批结果互相覆盖） */
+  private latencyQueue: Promise<void> = Promise.resolve();
+  private lastLatencyFlushAt: number = 0;
+
+  /**
+   * 单个节点延迟：先在内存里落值让界面立刻变色，再把"仅这个字段"交给写盘队列。
+   *
+   * ⚠️ 原来这里是"改完内存 → 测完 `saveProfiles(this.profiles)` 整表覆盖"：
+   *   · 测一整组要几十秒，期间订阅更新/会话流量统计写进磁盘的东西，
+   *     会在结束时被这份旧快照整表冲掉（延迟保住了、流量/新节点丢了）；
+   *   · 进程中途被系统回收则整轮白测。
+   * 现在按 1.2s 节流分批 `mutateProfiles`，只改 latencyMs/latencyTestedAt。
+   */
   private commitLatency(id: string, ms: number): void {
     for (const p of this.profiles) {
       if (p.id === id) {
@@ -515,8 +673,50 @@ export class AppState {
         p.latencyTestedAt = Date.now();
       }
     }
+    this.pendingLatency.set(id, ms);
     this.profiles = this.profiles.slice();
     this.bump();
+    const now: number = Date.now();
+    if (now - this.lastLatencyFlushAt >= 1200) {
+      this.lastLatencyFlushAt = now;
+      this.queueLatencyFlush();
+    }
+  }
+
+  private queueLatencyFlush(): void {
+    if (this.pendingLatency.size === 0) {
+      return;
+    }
+    const batch: Map<string, number> = new Map<string, number>();
+    this.pendingLatency.forEach((ms: number, id: string): void => {
+      batch.set(id, ms);
+    });
+    this.pendingLatency.clear();
+    this.latencyQueue = this.latencyQueue
+      .then((): Promise<void> => this.applyLatencyBatch(batch))
+      .catch((e: Error): void => {
+        this.log(`[ui] 延迟结果落库失败：${e.message}`);
+      });
+  }
+
+  /** 只按 id 覆写延迟两列；不整表覆盖，也不替换内存里的 `this.profiles`（可能还有更新的结果没落库） */
+  private async applyLatencyBatch(batch: Map<string, number>): Promise<void> {
+    const testedAt: number = Date.now();
+    await mutateProfiles((list: Array<Profile>): Array<Profile> => {
+      for (const p of list) {
+        const ms: number | undefined = batch.get(p.id);
+        if (ms !== undefined) {
+          p.latencyMs = ms;
+          p.latencyTestedAt = testedAt;
+        }
+      }
+      return list;
+    });
+  }
+
+  private async flushLatency(): Promise<void> {
+    this.queueLatencyFlush();
+    await this.latencyQueue;
   }
 
   /**
@@ -1142,7 +1342,17 @@ export class AppState {
       await mutateProfiles((list: Array<Profile>): Array<Profile> => {
         const next: Array<Profile> = [];
         for (const item of list) {
-          next.push(item.id === p.id ? p : item);
+          if (item.id !== p.id) {
+            next.push(item);
+            continue;
+          }
+          // 延迟/流量是运行期数据（编辑页根本没有这两个输入框），必须继承**磁盘上最新的**那份：
+          // 拿页面打开时的旧快照覆盖，会把订阅更新后新测的延迟、扩展进程刚写回的会话流量一起抹掉。
+          p.latencyMs = item.latencyMs;
+          p.latencyTestedAt = item.latencyTestedAt;
+          p.rx = item.rx;
+          p.tx = item.tx;
+          next.push(p);
         }
         return next;
       });
@@ -1257,42 +1467,60 @@ export class AppState {
     return out;
   }
 
-  /** 清除流量统计（原版 action_clear_traffic_statistics） */
+  /**
+   * 清除流量统计（原版 action_clear_traffic_statistics）。
+   * 只把命中节点的 rx/tx 归零：走 `mutateProfiles` 的读改写，别用"整表覆盖"——
+   * 否则会把同时在跑的测速结果、会话流量统计一起冲掉。
+   */
   async clearTrafficStats(groupId: string): Promise<number> {
-    const list: Array<Profile> = this.inScope(groupId);
-    let changed: number = 0;
-    for (const p of list) {
+    const ids: Set<string> = new Set<string>();
+    for (const p of this.inScope(groupId)) {
       if (p.rx !== 0 || p.tx !== 0) {
-        p.rx = 0;
-        p.tx = 0;
-        changed++;
+        ids.add(p.id);
       }
     }
-    if (changed > 0) {
-      await saveProfiles(this.profiles);
-      this.profiles = this.profiles.slice();
-      this.bump();
+    if (ids.size === 0) {
+      return 0;
     }
-    return changed;
+    const updated: Array<Profile> = await mutateProfiles((list: Array<Profile>): Array<Profile> => {
+      for (const p of list) {
+        if (ids.has(p.id)) {
+          p.rx = 0;
+          p.tx = 0;
+        }
+      }
+      return list;
+    });
+    this.profiles = updated;
+    this.bump();
+    return ids.size;
   }
 
-  /** 清除测速结果（latencyMs=0 表示未测速） */
+  /** 清除测速结果（latencyMs=0 表示未测速）；同样走读改写，避免整表覆盖 */
   async clearTestResults(groupId: string): Promise<number> {
-    const list: Array<Profile> = this.inScope(groupId);
-    let changed: number = 0;
-    for (const p of list) {
+    const ids: Set<string> = new Set<string>();
+    for (const p of this.inScope(groupId)) {
       if (p.latencyMs !== 0 || p.latencyTestedAt !== 0) {
-        p.latencyMs = 0;
-        p.latencyTestedAt = 0;
-        changed++;
+        ids.add(p.id);
       }
     }
-    if (changed > 0) {
-      await saveProfiles(this.profiles);
-      this.profiles = this.profiles.slice();
-      this.bump();
+    if (ids.size === 0) {
+      return 0;
     }
-    return changed;
+    // 正在跑的那轮测速还有没落库的结果：一起丢掉，否则刚清完又被下一批 flush 写回来
+    this.pendingLatency.clear();
+    const updated: Array<Profile> = await mutateProfiles((list: Array<Profile>): Array<Profile> => {
+      for (const p of list) {
+        if (ids.has(p.id)) {
+          p.latencyMs = 0;
+          p.latencyTestedAt = 0;
+        }
+      }
+      return list;
+    });
+    this.profiles = updated;
+    this.bump();
+    return ids.size;
   }
 
   /** 移除重复节点（判据 = 类型 + 服务器 + 端口 + UUID/密码），保留第一条 */
@@ -1387,7 +1615,17 @@ export class AppState {
     this.runtime.setStatus(status, running, profileId);
   }
 
-  applyTraffic(up: number, down: number, totalUp: number, totalDown: number): void {
+  /**
+   * 流量回写。
+   * `running/profileId` 来自扩展进程的流量事件:UI 进程被回收后重开时,它以为"未连接",
+   * 而隧道一直在跑 —— 只靠状态事件的话要等到下一次连接/切换才纠正(表现:"进软件看到未连接、速度 0")。
+   * 这里用每秒一次的流量事件把会话状态补回来;会话结束的那条事件带 running=false,不会误判。
+   */
+  applyTraffic(up: number, down: number, totalUp: number, totalDown: number,
+    running: boolean = true, profileId: string = ''): void {
+    if (running && !this.runtime.vpnRunning) {
+      this.runtime.setStatus('connected:running', true, profileId);
+    }
     this.runtime.setTraffic(up, down, totalUp, totalDown);
   }
 

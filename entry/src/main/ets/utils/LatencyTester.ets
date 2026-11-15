@@ -28,12 +28,41 @@ export interface LatencyRunReport {
   degradeReason: string;
   // true = 绑定物理网卡导致全组失败,已自动去掉绑定重测
   bindFallback: boolean;
+  // 本轮真正跑完的通过/总数(界面据此给"x/y 可用"的结论,不要只说"完成")
+  ok: number;
+  total: number;
 }
 
 /** 一轮测速的通过/总数统计,用于判断"是否全红"以决定要不要去掉绑定重测。 */
-class PassCount {
+export class LatencyPassCount {
   ok: number = 0;
   total: number = 0;
+}
+
+/**
+ * 一次测速请求的最终结果(给 UI 用的统一口径)。
+ * ⚠️ 为什么需要它:原来 `AppState.testLatency()` 只返回 void ——
+ *   · 正在测速时再次点击会被 `if (this.testing) return` 静默吞掉,
+ *     而调用方照旧弹「XX 完成」⇒ 用户看到"明明没测却说已完成"(甲方 2026-11-15 反馈);
+ *   · 内部 catch 掉异常后也返回正常,失败同样被报成"完成"。
+ * 现在把"到底跑了没跑"显式带回调用方,谁都不能再瞎猜。
+ */
+export class LatencyTestOutcome {
+  /** false = 根本没测(忙 / 没目标 / 配置失败),调用方不能再提示"完成" */
+  ran: boolean = false;
+  /** true = 已有一轮测速在跑,本次请求被拒绝 */
+  busy: boolean = false;
+  /** true = 本次是真连接测试(URL Test),false = TCPing */
+  urlMode: boolean = false;
+  ok: number = 0;
+  total: number = 0;
+  /** URL Test 降级成 TCPing(结果只反映握手耗时) */
+  degraded: boolean = false;
+  degradeReason: string = '';
+  /** 绑定物理网卡导致全红,已去掉绑定重测 ⇒ 这批结果不可当作测量结论 */
+  bindFallback: boolean = false;
+  /** 非空 = 没测起来的原因(给用户看的一句话) */
+  reason: string = '';
 }
 
 export async function tcpPing(host: string, port: number, timeoutMs: number = 3000): Promise<number> {
@@ -61,9 +90,10 @@ export async function tcpPing(host: string, port: number, timeoutMs: number = 30
 /** TCPing:并发测试全部节点;ms = -1 表示失败。samples>1 取平均,retries 为失败追加轮次。 */
 export async function testProfiles(profiles: Array<Profile>,
   onResult: (id: string, ms: number) => void, concurrency: number = 4,
-  timeoutMs: number = 5000, retries: number = 0, samples: number = 1): Promise<void> {
+  timeoutMs: number = 5000, retries: number = 0, samples: number = 1): Promise<LatencyPassCount> {
   const round = samples > 0 ? samples : 1;
   const extra = retries > 0 ? retries : 0;
+  const count: LatencyPassCount = new LatencyPassCount();
   let index = 0;
   const runWorker = async (): Promise<void> => {
     while (index < profiles.length) {
@@ -87,6 +117,10 @@ export async function testProfiles(profiles: Array<Profile>,
           break;
         }
       }
+      count.total++;
+      if (ok.length > 0) {
+        count.ok++;
+      }
       onResult(p.id, ok.length === 0 ? -1 : averageOf(ok));
     }
   };
@@ -96,6 +130,7 @@ export async function testProfiles(profiles: Array<Profile>,
     workers.push(runWorker());
   }
   await Promise.all(workers);
+  return count;
 }
 
 function averageOf(values: Array<number>): number {
@@ -128,7 +163,9 @@ export async function urlTestProfiles(targets: Array<Profile>, allProfiles: Arra
   settings: AppSettings, context: common.Context,
   onResult: (id: string, ms: number) => void, concurrency: number = 4,
   groups: Array<ProfileGroup> = []): Promise<LatencyRunReport> {
-  const report: LatencyRunReport = { degraded: false, degradeReason: '', bindFallback: false };
+  const report: LatencyRunReport = {
+    degraded: false, degradeReason: '', bindFallback: false, ok: 0, total: 0
+  };
   const timeoutMs = settings.testTimeoutMs > 0 ? settings.testTimeoutMs : 5000;
   const testUrl = settings.testUrl.trim();
   const expectStatus = settings.testExpectStatus === 'any' ? 'any' : '2xx';
@@ -138,7 +175,10 @@ export async function urlTestProfiles(targets: Array<Profile>, allProfiles: Arra
     report.degraded = true;
     report.degradeReason = why;
     LogStore.addLog(`[test] ${why},已回退 TCPing(结果只反映握手耗时,不代表真连接可用)`);
-    await testProfiles(targets, onResult, concurrency, timeoutMs, settings.testRetries, settings.testSamples);
+    const counts: LatencyPassCount = await testProfiles(targets, onResult, concurrency, timeoutMs,
+      settings.testRetries, settings.testSamples);
+    report.ok = counts.ok;
+    report.total = counts.total;
     return report;
   };
   let cfg: LatencyTestConfig;
@@ -162,7 +202,7 @@ export async function urlTestProfiles(targets: Array<Profile>, allProfiles: Arra
     LogStore.addLog('[test] 内核为旧版测速导出,不做响应状态码判定(403/500 也会判绿,需重编 libsingbox.so)');
   }
   const bindIfname = (v2 && settings.testBypassTunnel) ? await resolvePhysicalIfname() : '';
-  const run = async (bind: string): Promise<PassCount> => {
+  const run = async (bind: string): Promise<LatencyPassCount> => {
     const startErr = await CoreManager.testStart(configPath, bind);
     if (startErr.length > 0) {
       throw new Error(startErr);
@@ -210,14 +250,16 @@ export async function urlTestProfiles(targets: Array<Profile>, allProfiles: Arra
         LogStore.addLog(`[test] 测速内核停止报错(忽略): ${stopErr}`);
       }
     }
-    const count = new PassCount();
+    const count: LatencyPassCount = new LatencyPassCount();
     count.ok = passed;
     count.total = tested;
     return count;
   };
-  let firstPass: PassCount;
+  let firstPass: LatencyPassCount;
   try {
     firstPass = await run(bindIfname);
+    report.ok = firstPass.ok;
+    report.total = firstPass.total;
   } catch (e) {
     return await fallback(`测速内核启动失败: ${e instanceof Error ? e.message : `${e}`}`);
   }
@@ -229,7 +271,9 @@ export async function urlTestProfiles(targets: Array<Profile>, allProfiles: Arra
     // 而首轮已经把 -1 写进了所有节点,界面必须有机会说明这批全红不是测量结论。
     report.bindFallback = true;
     try {
-      await run('');
+      const secondPass: LatencyPassCount = await run('');
+      report.ok = secondPass.ok;
+      report.total = secondPass.total;
     } catch (e) {
       LogStore.addLog(`[test] 去掉绑定后重测仍失败: ${e instanceof Error ? e.message : `${e}`}`);
     }
