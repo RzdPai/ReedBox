@@ -261,7 +261,7 @@ export default class EntryAbility extends UIAbility {
   }
 
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
-    LogStore.addLog('[app] NekoBox 启动');
+    LogStore.addLog('[app] ReedBox 启动');
     // 全局状态先拿到 context，页面侧就不必到处 getContext
     AppState.get().attachContext(this.context);
     this.handleAction(want);

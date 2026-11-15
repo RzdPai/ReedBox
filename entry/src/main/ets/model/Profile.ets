@@ -228,7 +228,10 @@ export class AppSettings {
   navLayout: string = 'bottom';        // bottom / side
   showBottomBar: boolean = false;      // Android: retain StatsBar/FAB outside configuration
   ipv6Mode: string = '';               // Android IPv6Mode: ''(legacy)=由ipv6布尔推导 / disable/enable/prefer/only
-  clashApiEnabled: boolean = true;
+  // 默认关(用户 2026-11-15 要求):不开只监听 127.0.0.1 的控制器端口,也不暴露 secret。
+  // 代价 = 通知栏/首页的实时速率、按节点累计流量、selector 热切换这些走 Clash API 的能力都不可用,
+  // 需要时到「设置 → 杂项」手动打开。
+  clashApiEnabled: boolean = false;
   // Clash API 端口:9090 改为 19290(2.0.2 共存修复)。9090 是 Clash/mihomo 系应用
   // 共用的 external-controller 惯用默认端口,鸿蒙第三方应用共享回环命名空间,
   // 多款同类应用共存时控制器端口互踩(对方的就绪探测会看见"端口被占")。
@@ -252,6 +255,9 @@ export class AppSettings {
   // 2.0.2 共存修复一次性迁移标记:loadSettings 首次读到 false 时执行迁移并置 true
   // 落盘;此后不再重复迁移,用户在设置页重新打开的开关一律保留。
   coexistFix202609Applied: boolean = false;
+  // 一次性迁移标记:Clash API 默认关(2026-11-15)。只改默认值对老装机无效(存量设置里存的是 true),
+  // 首次读到 false 时强制关一次并落盘;之后用户在设置里重新打开就按用户的来。
+  clashApiDefaultOffApplied: boolean = false;
 }
 
 export function profileTypeLabel(type: string): string {

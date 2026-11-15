@@ -8,6 +8,7 @@ import { Space, Theme } from '../Theme';
 
 const DOMAIN: number = 0x4e4b;
 const TAG: string = 'NekoBox-About';
+const PROJECT_REPO: string = 'https://github.com/RzdPai/ReedBox';
 const UPSTREAM_REPO: string = 'https://github.com/MatsuriDayo/NekoBoxForAndroid';
 const KERNEL_VERSION: string = 'sing-box 1.14.0';
 
@@ -120,7 +121,7 @@ export struct AboutPage {
               .objectFit(ImageFit.Cover)
               .alt($r('app.media.icon'))
 
-            Text('NekoBox for HarmonyOS')
+            Text('ReedBox for HarmonyOS')
               .fontSize(18)
               .fontWeight(FontWeight.Medium)
               .fontColor(Theme.TEXT_1)
@@ -154,6 +155,10 @@ export struct AboutPage {
           .backgroundColor(Theme.SURFACE)
 
           Column() {
+            this.itemRow('项目地址', PROJECT_REPO, '', () => {
+              this.copy(PROJECT_REPO, '仓库地址');
+            })
+            Divider().color(Theme.HAIRLINE).margin({ left: 16 })
             this.itemRow('上游项目', UPSTREAM_REPO, '', () => {
               this.copy(UPSTREAM_REPO, '仓库地址');
             })
@@ -180,7 +185,7 @@ export struct AboutPage {
           .borderRadius(18)
           .backgroundColor(Theme.SURFACE)
 
-          Text('个人改造版 · 内核与协议解析沿用上游')
+          Text('个人项目 · 内核与协议解析沿用上游')
             .fontSize(11)
             .fontColor(Theme.TEXT_3)
             .width('100%')

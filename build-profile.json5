@@ -7,7 +7,7 @@
      * 当前只有一套界面（用户 2026-11-01 定：先把一套做好，之后再拆皮肤）。
      * ⚠️ hvigor 硬性要求存在一个名为 default 的 product，所以名字就叫 default。
      * 将来要做第二套皮肤时：加一个 product（如 modern）+ `buildProfileFields.UI_STYLE`，
-     * 页树按常量选，别去维护两份 sourceRoots（见 README「两套界面怎么共存」）。
+     * 页树按常量选，别去维护两份 sourceRoots（见 docs/工程说明.md「两套界面怎么共存」）。
      */
     "products": [
       {

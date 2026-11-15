@@ -1394,3 +1394,58 @@ Existing notification files reviewed:
 - **并发测速是"拒绝"而不是"抢占"**:正在跑的那轮不会被打断。若用户更希望"点新的一定跑新的",需要给 tester 加协作式取消令牌(worker 逐节点检查 + 测速内核 stop),风险面更大,留待用户确认后单独做。
 - **两份首选项(nodes/groups/settings)在多进程下的可见性**:`:vpn` 扩展进程与 UI 进程共用 `nekobox_store`(默认 XML 存储)。官方文档明确 XML 模式**不支持多进程并发**,GSKV 模式才支持;本轮没做存储层迁移(需要一次性读旧写新 + 回读校验,且本机无法真机验证),只在业务层把"整表覆盖"全改成"字段级读改写"来缩小爆炸半径。
   若后续仍观察到"设置/节点整批丢失",优先按 `RzdDocs/memory/全局记忆.md` 的思路切 GSKV 并保留 XML 作回退。
+
+## 2026-11-16 改名 ReedBox + 新图标 + Clash API 默认关 + 开源到 GitHub(0.5.59)
+
+用户要求:① 换一套自己画的图标;② 软件名 NekoBox → **ReedBox**;③ 项目地址 `RzdPai/ReedBox`,建仓库并把源码推上去(README 只留极简介绍,细节用户自己写);④ **Clash API 默认关**。
+
+### 图标(全部按用户给的 SVG 重新出)
+
+- 源文件是一张 512×512 的 SVG(白色底 + 紫→蓝渐变的叶片/羽毛形,带一层 0.14 透明高光)。用 `cairosvg` 出位图:
+  - `AppScope/resources/base/media/app_icon.png`、`entry/src/main/resources/base/media/icon.png` = 1024×1024(白底,桌面/应用列表/关于页/抽屉头像共用);
+  - `entry/src/main/resources/base/media/start_icon.png` = 512×512 **透明底**(去掉白底、四周留 8% 边)——
+    开屏底色在夜间是深色,白方图会变成一块白板(老坑,见第六十一轮前的记录)。
+- 删掉不再被引用的分层图三件套(`layered_image.json` / `background.png` / `foreground.png`,AppScope 与 entry 各一份):
+  `module.json5` 早在 2026-11-01 就改成指单张 `$media:icon`,这三份是死资源,HAP 里白占 ~450KB。
+- ⚠️ 复现方式:`python3 -m pip install --break-system-packages cairosvg`(需要系统 `libcairo2`,已 `apt-get install -y libcairo2`)。
+  渲染用的 SVG 已随本轮存在 `/tmp` 外不留档,原始 SVG 由用户在会话里给出。
+
+### 改名 NekoBox → ReedBox
+
+- 显示名:`AppScope` 与 `entry` 的 `string.json` 里 `app_name` = **ReedBox**、`brand_name` = **REEDBOX**、about 标题 = **ReedBox for HarmonyOS**(中英两份都改)。
+- UI 里写死的名字:首页页头 `title: 'ReedBox'`、抽屉头部 `Text('ReedBox')`、关于页大标题、启动日志 `[app] ReedBox 启动`。
+- 关于页新增一行「项目地址 → https://github.com/RzdPai/ReedBox」(点一下复制),上游 NekoBoxForAndroid 那行保留(归因)。
+- 许可说明跟着改:应用图标已是自绘,不再写"图标来自 NekoBoxForAndroid"。
+- ⚠️ **bundleName 保持 `com.rzdpai.nekobox`**(`AppScope/app.json5` + VPN 扩展 + `BuildProfile.BUNDLE_NAME` 的 CommonEvent 全链路绑着它)。
+  改它等于装出一个**新应用**:老用户数据(节点/订阅/设置)不会迁过去,VPN 授权也要重来。要改的话单独一轮处理迁移,本轮不动。
+- 日志 TAG(`NekoBox-State/Home/...`)与 `hilog | grep NekoBox-` 的排查习惯**不动**(内部标识,不是软件名)。
+
+### Clash API 默认关
+
+- `AppSettings.clashApiEnabled` 默认 `true → false`;只监听 `127.0.0.1` 的控制器端口默认不再开,也就不再暴露 secret。
+- **存量装机一次性迁移**:老装机设置里存的是默认 true,只改默认值对它们无效 ——
+  新增 `AppSettings.clashApiDefaultOffApplied` 标记,`loadSettings` 首次读到 false 时强制关一次并落盘(与「智感握姿默认关」同样的做法)。
+- 代价(需要时到「设置 → 杂项」手动打开):通知栏/首页实时速率、按节点累计流量(↑tx ↓rx)、selector 热切换都走 Clash API,默认关后这些不可用。
+  `ConfigBuilder` 只在开关打开时才写 `experimental.clash_api`,内核其余行为不受影响。
+
+### 开源
+
+- 新增极简 `README.md`(介绍 / 协议列表 / 构建命令 / 归因),原详细说明挪到 `docs/工程说明.md`(`build-profile.json5` 里的引用一并改);
+  新增 `LICENSE`(GPL-3.0 全文,与 sing-box / NekoBoxForAndroid 一致)。
+- 仓库:`https://github.com/RzdPai/ReedBox`(public),推送整棵树(含冻结的 `entry/libs/arm64-v8a/libsingbox.so` 与 `core/` 内核源码)。
+  推送前扫过 `ghp_` / 私钥 / 明文口令:无命中(`HANDOFF.md` 里那句"密码存外部记忆"是有意留下的说明)。
+
+### 改动文件
+
+- 资源:`AppScope/resources/base/{element/string.json,media/app_icon.png}`、`entry/src/main/resources/base/{element/string.json,media/icon.png,media/start_icon.png}`、`entry/src/main/resources/en_US/element/string.json`
+- 代码:`model/Profile.ets`(clashApi 默认 + 迁移标记)、`model/Store.ets`(一次性迁移)、`ui/neko/{ProfilesPage,AboutPage}.ets`、`pages/Bootstrap.ets`、`entryability/EntryAbility.ets`、`entry/src/main/cpp/types/libentry/oh-package.json5`
+- 文档:`README.md`(新)、`docs/工程说明.md`(原 README)、`LICENSE`(新)、`build-profile.json5`(注释里的路径)、`AppScope/app.json5`(0.5.59)
+- 删除:`AppScope/resources/base/media/{layered_image.json,background.png,foreground.png}`、`entry/src/main/resources/base/media/layered_image.json`
+
+### 验证
+
+- `node tools/check-state-chain.cjs`:**69/69 PASS**(改名/图标没碰状态链,回归通过)。
+- 构建 `BUILD SUCCESSFUL`:unsigned HAP **15,489,510** 字节(上版 16,348,651;-860KB:旧图标是没压过的 590KB PNG,
+  分层图三件套也一并删了),SHA256 `2BFC5AAD6BF353AFDD76B013A8AC32AC998290F3603D83145B53D679C6847EB6`;
+  `module.json` = `0.5.59 / 500059`,`resources/base/media/{icon,app_icon,start_icon}.png` 均在包内(size 31367/31367/17317)。
+- 未上机:图标观感(桌面遮罩后是否被裁边)、开屏夜间效果、改名后系统设置里显示的名字,均待真机确认。

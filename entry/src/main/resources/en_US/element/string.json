@@ -2,7 +2,7 @@
   "string": [
     {
       "name": "app_name",
-      "value": "NekoBox"
+      "value": "ReedBox"
     },
     {
       "name": "permission_read_pasteboard_reason",
@@ -10,7 +10,7 @@
     },
     {
       "name": "brand_name",
-      "value": "NEKOBOX"
+      "value": "REEDBOX"
     },
     {
       "name": "subscription_management",
@@ -1762,7 +1762,7 @@
     },
     {
       "name": "drawer_footer",
-      "value": "NekoBox for Harmony"
+      "value": "ReedBox for HarmonyOS"
     },
     {
       "name": "test_current_group",
@@ -2054,7 +2054,7 @@
     },
     {
       "name": "about_license_body",
-      "value": "sing-box is GPL-3.0; the app icon comes from NekoBoxForAndroid (GPL-3.0)."
+      "value": "sing-box is GPL-3.0; the kernel and protocol parsing come from NekoBoxForAndroid (GPL-3.0)."
     },
     {
       "name": "settings_general",

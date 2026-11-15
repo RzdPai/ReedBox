@@ -1316,7 +1316,7 @@ export struct ProfilesPage {
     Stack({ alignContent: Alignment.Bottom }) {
       Column() {
         PageHeader({
-          title: 'NekoBox',
+          title: 'ReedBox',
           subtitle: this.app.testing
             ? `${this.app.testLabel} 测速中 ${this.app.testDone}/${this.app.testTotal}`
             : (this.profileCount === 0 ? '还没有配置' : `${this.profileCount} 个配置 · ${this.groupCount} 个分组`),

@@ -2,5 +2,5 @@
   "name": "libentry.so",
   "types": "./index.d.ts",
   "version": "1.0.0",
-  "description": "NekoBox4Harmony native core bridge"
+  "description": "ReedBox native core bridge"
 }

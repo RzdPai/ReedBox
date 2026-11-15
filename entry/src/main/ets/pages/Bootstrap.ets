@@ -199,7 +199,7 @@ struct Bootstrap {
           .objectFit(ImageFit.Cover)
           .alt($r('app.media.icon'))
 
-        Text('NekoBox')
+        Text('ReedBox')
           .fontSize(16)
           .fontWeight(FontWeight.Medium)
           .fontColor(Theme.TEXT_1)
