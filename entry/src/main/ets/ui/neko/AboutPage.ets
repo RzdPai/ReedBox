@@ -3,7 +3,8 @@ import bundleManager from '@ohos.bundle.bundleManager';
 import common from '@ohos.app.ability.common';
 import { AppState } from '../../core/AppState';
 import { setClipboardText } from '../../utils/ClipboardHelper';
-import { PageHeader } from '../CommonUi';
+import { checkForUpdate, UpdateCheckResult, UpdateRelease } from '../../utils/UpdateCheck';
+import { PageHeader, showNotice } from '../CommonUi';
 import { Space, Theme } from '../Theme';
 
 const DOMAIN: number = 0x4e4b;
@@ -17,7 +18,7 @@ const KERNEL_VERSION: string = 'sing-box 1.14.0';
  *
  * 原版条目：应用版本 / 检查更新（正式、预览）/ sing-box 版本 / 捐赠 / 忽略电池优化 /
  * 项目（GitHub、Telegram）/ 作者 / 许可协议。
- * 本仓去掉 Android 专属项（忽略电池优化、捐赠、作者墙），把更新检查如实标为未接入，
+ * 本仓去掉 Android 专属项（忽略电池优化、捐赠、作者墙）；更新检查走 GitHub Releases（正式版=非 prerelease），
  * 链接改为复制到剪贴板（不擅自拉起浏览器）。
  */
 @ComponentV2
@@ -27,6 +28,13 @@ export struct AboutPage {
   };
   @Local app: AppState = AppState.get();
   @Local version: string = '';
+  /** 只有 versionName（比较版本号用），`version` 是给用户看的“名字 (code)” */
+  private versionName: string = '';
+  /** 两条入口各自的状态文本：'' = 还没查过 */
+  @Local stableState: string = '';
+  @Local previewState: string = '';
+  /** 正在查的那条渠道（'' = 空闲）；两条共用一次网络请求即可，这里只做防抖 */
+  @Local checkChannel: string = '';
   private scroller: Scroller = new Scroller();
 
   aboutToAppear(): void {
@@ -41,6 +49,7 @@ export struct AboutPage {
     try {
       const info: bundleManager.BundleInfo =
         bundleManager.getBundleInfoForSelfSync(bundleManager.BundleFlag.GET_BUNDLE_INFO_DEFAULT);
+      this.versionName = info.versionName;
       return `${info.versionName} (${info.versionCode})`;
     } catch (e) {
       return '';
@@ -61,6 +70,64 @@ export struct AboutPage {
     }).catch((e: Error) => {
       this.toast(`复制失败：${e.message}`);
     });
+  }
+
+  /**
+   * 检查更新（GitHub Releases）。
+   *   `channel='stable'` → 只看非 prerelease；`'preview'` → 连 prerelease 一起看。
+   * 结果三态：有新版本（弹窗 + 复制下载链接）/ 已是最新 / 失败（原样带出原因）。
+   */
+  private async runUpdateCheck(channel: string): Promise<void> {
+    if (this.checkChannel.length > 0) {
+      this.toast('正在检查，请稍候');
+      return;
+    }
+    if (this.versionName.length === 0) {
+      // 读不到本机版本就没法判断“新不新”，宁可提示也不要瞎报
+      this.toast('读不到当前版本号，无法检查更新');
+      return;
+    }
+    this.checkChannel = channel;
+    this.setState(channel, '检查中…');
+    try {
+      const result: UpdateCheckResult = await checkForUpdate(channel, this.versionName);
+      if (!result.ok) {
+        this.setState(channel, '检查失败');
+        this.toast(result.error);
+        return;
+      }
+      const latest: UpdateRelease | null = result.latest;
+      if (latest === null) {
+        this.setState(channel, '还没有发布版本');
+        this.toast('仓库里还没有发布版本');
+        return;
+      }
+      if (!result.hasUpdate) {
+        this.setState(channel, `已是最新（v${latest.versionName}）`);
+        this.toast(`已是最新版本 v${latest.versionName}`);
+        return;
+      }
+      this.setState(channel, `有新版本 v${latest.versionName}`);
+      const link: string = latest.assetUrl.length > 0 ? latest.assetUrl : latest.pageUrl;
+      const notes: string = latest.notes.trim();
+      const detail: string = notes.length > 0
+        ? `${notes.length > 160 ? `${notes.substring(0, 160)}…` : notes}\n\n下载地址：${link}`
+        : `下载地址：${link}`;
+      showNotice(this.getUIContext(), `发现新版本 v${latest.versionName}`, detail,
+        '复制下载链接', () => {
+          this.copy(link, '下载链接');
+        });
+    } finally {
+      this.checkChannel = '';
+    }
+  }
+
+  private setState(channel: string, text: string): void {
+    if (channel === 'preview') {
+      this.previewState = text;
+    } else {
+      this.stableState = text;
+    }
   }
 
   /** 一行「标题 + 副标题 + 右侧值」（对应原版 Preference 的 title / summary / summaryProvider） */
@@ -142,12 +209,12 @@ export struct AboutPage {
               this.toast('内核随 HAP 分发');
             })
             Divider().color(Theme.HAIRLINE).margin({ left: 16 })
-            this.itemRow('检查更新（正式版）', '本仓尚未接入更新检查', '', () => {
-              this.toast('暂未接入更新检查');
+            this.itemRow('检查更新（正式版）', '从 GitHub Releases 取最新正式版', this.stableState, () => {
+              this.runUpdateCheck('stable');
             })
             Divider().color(Theme.HAIRLINE).margin({ left: 16 })
-            this.itemRow('检查更新（预览版）', '本仓尚未接入更新检查', '', () => {
-              this.toast('暂未接入更新检查');
+            this.itemRow('检查更新（预览版）', '含 prerelease（预览版/测试版）', this.previewState, () => {
+              this.runUpdateCheck('preview');
             })
           }
           .width('100%')

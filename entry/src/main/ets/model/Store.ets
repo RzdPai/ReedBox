@@ -219,16 +219,6 @@ export async function loadSettings(): Promise<AppSettings> {
     await pref.put(KEY_SETTINGS, JSON.stringify(s));
     await pref.flush();
   }
-  // 2026-11-15 一次性迁移:Clash API 默认关。老装机的设置里存的是默认 true,
-  // 只把字段默认值改成 false 对它们无效 —— 与「智感握姿默认关」同样的处理(只跑一次,之后尊重用户)。
-  if (!s.clashApiDefaultOffApplied) {
-    s.clashApiDefaultOffApplied = true;
-    if (s.clashApiEnabled) {
-      s.clashApiEnabled = false;
-      await pref.put(KEY_SETTINGS, JSON.stringify(s));
-      await pref.flush();
-    }
-  }
   return s;
 }
 

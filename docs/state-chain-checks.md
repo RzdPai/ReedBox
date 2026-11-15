@@ -70,4 +70,10 @@ Validation: source/host logic only. ArkUI decorators are stripped for the mock h
 - PASS: A subscription refresh carries latency and traffic onto the rebuilt nodes
 - PASS: Latency tests persist field-by-field instead of replacing the whole profile table
 - PASS: Editing a node keeps the runtime columns already on disk
+- PASS: Version comparison treats dotted numbers numerically and pads missing parts
+- PASS: Releases parse into version, notes and the .hap download link
+- PASS: Stable checks ignore prereleases, preview checks see them
+- PASS: Only a strictly newer release counts as an update
+- PASS: A rate-limit or error payload is not mistaken for a release list
+- PASS: The about page actually calls the checker for both channels
 - PASS: All ETS sources meet the V2 and Navigation constraints

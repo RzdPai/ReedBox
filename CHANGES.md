@@ -1449,3 +1449,47 @@ Existing notification files reviewed:
   分层图三件套也一并删了),SHA256 `2BFC5AAD6BF353AFDD76B013A8AC32AC998290F3603D83145B53D679C6847EB6`;
   `module.json` = `0.5.59 / 500059`,`resources/base/media/{icon,app_icon,start_icon}.png` 均在包内(size 31367/31367/17317)。
 - 未上机:图标观感(桌面遮罩后是否被裁边)、开屏夜间效果、改名后系统设置里显示的名字,均待真机确认。
+
+## 2026-11-16 撤销 Clash API 强制迁移 + 接入「检查更新」(0.5.60)
+
+用户意见:上一条"老装机也强制关一次"不要,只改默认值即可;然后「检查更新」接一下。
+
+### A. Clash API:只改默认值,不做存量迁移
+
+- 删掉 `AppSettings.clashApiDefaultOffApplied` 与 `Store.loadSettings` 里那段一次性强制关:
+  **存量装机升级后保持它自己设置里的值**(旧版默认 true 的会继续 true),新装机默认 false。
+- 设置项注释改成"只改默认值",把"代价"写在旁边(通知/首页速率、按节点累计流量、selector 热切换都走 Clash API)。
+
+### B. 检查更新:接到 GitHub Releases
+
+- 新增 `utils/UpdateCheck.ets`(不碰 UI,可脱离界面测试):
+  - `checkForUpdate(channel, currentVersionName)` → GET `https://api.github.com/repos/RzdPai/ReedBox/releases?per_page=20`;
+  - `parseReleases` 把 JSON 收成 `UpdateRelease`(tag/版本/说明/发布页/.hap 资产),**draft 跳过**、限流等错误对象按空列表处理;
+  - `pickRelease`:正式版 = 非 prerelease,预览版 = 连 prerelease 一起(取最新一个);
+  - `compareVersions` 按段比数字(`0.5.60 > 0.5.59`、`v0.5.59 == 0.5.59`、缺段补 0),只有**严格更新**才算"有新版本";
+  - HTTP 403 单独提示"多是接口限流";其它状态码/异常原样带出(这台机器上 `api.github.com` 会解析到坏 IP,报错必须具体)。
+- 关于页两条入口接上(`ui/neko/AboutPage.ets`):
+  - 「检查更新(正式版)」「检查更新(预览版)」各带一行状态(检查中… / 已是最新(vX) / 有新版本 vX / 检查失败 / 还没有发布版本);
+  - 发现新版本时弹系统提示框(新增 `CommonUi.showNotice`):正文是 release notes 前 160 字 + 下载地址,
+    主按钮**复制下载链接**(沿用本页"不擅自拉起浏览器"的规矩),次按钮关闭;
+  - 读不到本机版本号时不出结果,直接提示(避免把"拿不到版本"当成"有新版本")。
+- 因为"检查更新"要能真跑通,顺手发了第一个 **GitHub Release**:tag `v0.5.60`,`ReedBox-0.5.60-unsigned.hap`(15,511,111 B)挂在资产里。
+  下次发版流程:改 `AppScope/app.json5` 版本 → `assembleHap` → `POST /repos/RzdPai/ReedBox/releases` → 把 HAP 传 `uploads.github.com/repos/.../releases/{id}/assets?name=...` → 同步传 WebDAV。
+- 自检新增 6 条(版本比较 / release 解析 / 正式与预览挑选 / 只有更新才算更新 / 限流与坏 JSON 不算发布列表 / 关于页两条入口真的调了检查),
+  总数 69 → **75**。
+
+### 改动文件
+
+- `model/Profile.ets`(删迁移字段、注释改成"只改默认值")、`model/Store.ets`(删迁移块)
+- `utils/UpdateCheck.ets`(新增)、`ui/CommonUi.ets`(`showNotice`)、`ui/neko/AboutPage.ets`(两条入口 + 状态 + 弹窗)
+- `tools/check-state-chain.cjs`(6 条新用例)、`AppScope/app.json5`(0.5.60)、`UPLOAD-MANIFEST.txt`(新哈希)
+
+### 验证
+
+- `node tools/check-state-chain.cjs`:75/75 PASS。
+- 构建 `BUILD SUCCESSFUL`:unsigned HAP **15,511,111** 字节,
+  SHA256 `B8368CB0AC18EAA7E008D1C7F75BBC053C899B6091DF81AC9090AA6FAEFCBD9E`;
+  `module.json` = `0.5.60 / 500060`;`ets/modules.abc` 含 `checkForUpdate/parseReleases/pickRelease/resolveCheckResult`。
+- 用真实 GitHub 返回的 JSON 对过一遍:只有 `v0.5.60` 一条、正式/预览都选它、当前 0.5.59 判"有更新"、当前 0.5.60 判"已是最新"。
+- 产物已同时放到 GitHub Release 资产与 WebDAV(`ReedBox-unsigned.hap`,回读哈希一致)。
+- 未上机:关于页两条入口的实际观感、设备上能否连到 `api.github.com`(国内网络可能失败 —— 失败会明确报错,不会假报"已是最新")。

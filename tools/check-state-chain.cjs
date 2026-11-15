@@ -1085,6 +1085,70 @@ async function main() {
     assert.match(text, /p\.rx = item\.rx;/);
   });
 
+  // ---- 检查更新：版本比较与 release 挑选（纯函数，真在 GitHub 上的行为另说）----
+  const updateModule = load('utils/UpdateCheck.ets', {
+    '@ohos.net.http': { createHttp() { throw new Error('network not available in host checks'); } }
+  });
+  checked('Version comparison treats dotted numbers numerically and pads missing parts', () => {
+    assert.ok(updateModule.compareVersions('0.5.60', '0.5.59') > 0);
+    assert.ok(updateModule.compareVersions('v0.10.0', '0.9.9') > 0);
+    assert.equal(updateModule.compareVersions('0.5.59', 'v0.5.59'), 0);
+    assert.equal(updateModule.compareVersions('0.5', '0.5.0'), 0);
+    assert.ok(updateModule.compareVersions('0.5.58', '0.5.59') < 0);
+    // vm 里造出来的数组原型和宿主机不同，用 JSON 比内容而不是 deepStrictEqual
+    assert.equal(JSON.stringify(updateModule.parseVersionName('v0.5.60')), '[0,5,60]');
+  });
+  const releaseJson = JSON.stringify([
+    { tag_name: 'v0.6.0-beta1', name: 'beta', body: 'pre', prerelease: true, draft: false, html_url: 'https://x/pre',
+      assets: [{ name: 'ReedBox-unsigned.hap', browser_download_url: 'https://x/pre.hap' }] },
+    { tag_name: 'v0.5.60', name: 'stable', body: 'notes', prerelease: false, draft: false, html_url: 'https://x/rel',
+      assets: [{ name: 'checksums.txt', browser_download_url: 'https://x/sums.txt' },
+               { name: 'ReedBox-unsigned.hap', browser_download_url: 'https://x/rel.hap' }] },
+    { tag_name: 'v0.5.50', name: 'old', prerelease: false, draft: false,
+      assets: [] }
+  ]);
+  checked('Releases parse into version, notes and the .hap download link', () => {
+    const releases = updateModule.parseReleases(releaseJson);
+    assert.equal(releases.length, 3);
+    assert.equal(releases[0].versionName, '0.6.0-beta1');
+    assert.equal(releases[0].prerelease, true);
+    assert.equal(releases[1].versionName, '0.5.60');
+    assert.equal(releases[1].assetUrl, 'https://x/rel.hap');
+    assert.equal(releases[1].notes, 'notes');
+  });
+  checked('Stable checks ignore prereleases, preview checks see them', () => {
+    const releases = updateModule.parseReleases(releaseJson);
+    assert.equal(updateModule.pickRelease(releases, 'stable').versionName, '0.5.60');
+    assert.equal(updateModule.pickRelease(releases, 'preview').versionName, '0.6.0-beta1');
+  });
+  checked('Only a strictly newer release counts as an update', () => {
+    const releases = updateModule.parseReleases(releaseJson);
+    const newer = updateModule.resolveCheckResult(releases, 'stable', '0.5.59');
+    assert.equal(newer.ok, true);
+    assert.equal(newer.hasUpdate, true);
+    const same = updateModule.resolveCheckResult(releases, 'stable', '0.5.60');
+    assert.equal(same.hasUpdate, false);
+    const ahead = updateModule.resolveCheckResult(releases, 'stable', '0.5.61');
+    assert.equal(ahead.hasUpdate, false);
+  });
+  checked('A rate-limit or error payload is not mistaken for a release list', () => {
+    const releases = updateModule.parseReleases('{"message":"API rate limit exceeded"}');
+    assert.equal(releases.length, 0);
+    const broken = updateModule.parseReleases('<html>502</html>');
+    assert.equal(broken.length, 0);
+    const empty = updateModule.resolveCheckResult([], 'stable', '0.5.59');
+    assert.equal(empty.ok, true);
+    assert.equal(empty.hasUpdate, false);
+    assert.equal(empty.latest, null);
+  });
+  checked('The about page actually calls the checker for both channels', () => {
+    const about = source('ui/neko/AboutPage.ets');
+    assert.match(about, /this\.runUpdateCheck\('stable'\)/);
+    assert.match(about, /this\.runUpdateCheck\('preview'\)/);
+    assert.match(about, /checkForUpdate\(channel, this\.versionName\)/);
+    assert.doesNotMatch(about, /暂未接入更新检查/);
+  });
+
   // A filename match is not evidence of success: inspect every ETS file recursively.
   function files(dir) { return fs.readdirSync(dir, { withFileTypes: true }).flatMap(e => e.isDirectory() ? files(path.join(dir, e.name)) : [path.join(dir, e.name)]); }
   checked('All ETS sources meet the V2 and Navigation constraints', () => {

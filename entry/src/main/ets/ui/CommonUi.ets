@@ -1394,6 +1394,35 @@ export function confirmDestructive(ctx: UIContext, title: string, message: strin
 }
 
 /**
+ * 信息型提示弹窗（主按钮 = 可选动作，次按钮 = 关闭）。
+ * 与 `confirmDestructive` 同一套 `showAlertDialog`，用完就地销毁，不占页面状态。
+ */
+export function showNotice(ctx: UIContext, title: string, message: string,
+  actionLabel: string, onAction: () => void): void {
+  try {
+    ctx.showAlertDialog({
+      title: title,
+      message: message,
+      autoCancel: true,
+      primaryButton: {
+        value: actionLabel,
+        action: () => {
+          onAction();
+        }
+      },
+      secondaryButton: {
+        value: '关闭',
+        action: () => {
+        }
+      }
+    });
+  } catch (e) {
+    // 弹窗起不来时把动作直接做掉（例如复制链接），别让用户点了没反应
+    onAction();
+  }
+}
+
+/**
  * 设置行 + 系统 `Select`（替代原来的半模态选择弹窗）。
  * 甲方 2026-11-01："这种选择的窗口别用半模态了，参考 RzdMusic 回响页的年月切换，用系统组件并且接入光感"。
  *
