@@ -1,0 +1,26 @@
+# HarmonyOS / hvigor 构建产物
+*.class
+node_modules/
+build/
+*/build/
+.hvigor/
+.cxx/
+oh_modules/
+*/oh_modules/
+.idea/
+.codegenie/
+.clangd/
+.clang-tidy/
+local.properties
+*.hap
+*.app
+*.hsp
+*.har
+
+# 本地交付物 / 调试产物（走 WebDAV，不入库）
+dist/
+*.log
+hilog*.txt
+
+# 注意：entry/libs/arm64-v8a/libsingbox.so 是**冻结内核产物**（见 AGENTS.md），
+# 必须入库，不要加进忽略列表。

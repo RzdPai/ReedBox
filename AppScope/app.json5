@@ -1,0 +1,10 @@
+{
+  "app": {
+    "bundleName": "com.rzdpai.nekobox",
+    "vendor": "rzdpai",
+    "versionCode": 500057,
+    "versionName": "0.5.57",
+    "icon": "$media:app_icon",
+    "label": "$string:app_name"
+  }
+}

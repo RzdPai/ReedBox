@@ -1,0 +1,67 @@
+{
+  "module": {
+    "name": "entry",
+    "type": "entry",
+    "description": "$string:module_desc",
+    "mainElement": "EntryAbility",
+    "deviceTypes": ["phone", "tablet"],
+    "deliveryWithInstall": true,
+    "installationFree": false,
+    // HAP 内原生库(zip deflate)压缩:libsingbox.so 约 35MB,压缩后 HAP 从 ~38.5MB 降到 ~24MB。
+    // 安装时由系统解压到应用原生库目录,运行不受影响(需真机回归验证一次)。
+    "compressNativeLibs": true,
+    "pages": "$profile:main_pages",
+    "abilities": [
+      {
+        "name": "EntryAbility",
+        "srcEntry": "./ets/entryability/EntryAbility.ets",
+        "description": "$string:module_desc",
+        // 图标别再指 layered_image：上游那套分层图里 foreground 自带一张"白卡 + 投影"，
+        // 叠在白色 background 上就成了"白底上再放一个小图标"（甲方 2026-11-01 点名难看）。
+        // 现用 `icon`（1024 平铺图标：上游 artwork 重排，去掉内层白卡）。
+        "icon": "$media:icon",
+        "label": "$string:app_name",
+        // 开屏图用**透明底**的 artwork（白底方图在夜间模式下就是一块白板 —— 甲方 2026-11-01 反馈）；
+        // 底色走 `start_window_background`，它在 dark 资源里有单独的深色值。
+        "startWindowIcon": "$media:start_icon",
+        "startWindowBackground": "$color:start_window_background",
+        "exported": true,
+        "backgroundModes": ["dataTransfer"],
+        "skills": [
+          {
+            "entities": ["entity.system.home"],
+            "actions": ["action.system.home"]
+          }
+        ]
+      }
+    ],
+    "extensionAbilities": [
+      {
+        "name": "VpnExtAbility",
+        "srcEntry": "./ets/vpnext/VpnExtAbility.ets",
+        "description": "sing-box VPN service",
+        // 本 SDK(HarmonyOS 6.1)合法值为 "vpn";旧文档中的 "vpnExtension" 已不适用
+        "type": "vpn",
+        "exported": false
+      }
+    ],
+    "requestPermissions": [
+      { "name": "ohos.permission.INTERNET" },
+      { "name": "ohos.permission.GET_NETWORK_INFO" },
+      { "name": "ohos.permission.KEEP_BACKGROUND_RUNNING" },
+      { "name": "ohos.permission.GET_BUNDLE_INFO" },
+      // 智感握姿(交互手/握持手):system_grant + normal,API 20 起,装上即用、无运行时弹窗
+      { "name": "ohos.permission.DETECT_GESTURE" },
+      {
+        "name": "ohos.permission.READ_PASTEBOARD",
+        "reason": "$string:permission_read_pasteboard_reason",
+        "usedScene": {
+          "abilities": ["EntryAbility"],
+          "when": "inuse"
+        }
+      }
+      // 若系统提示缺少 VPN 权限,按 SDK 文档追加(可能属于受限 ACL,需在 AGC 申请):
+      // { "name": "ohos.permission.MANAGE_VPN" }
+    ]
+  }
+}

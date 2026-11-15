@@ -1,0 +1,60 @@
+# State-chain regression checks
+
+Validation: source/host logic only. ArkUI decorators are stripped for the mock harness; device IPC and rendering remain unverified.
+
+- PASS: Runtime starts disconnected, transitions to connecting synchronously
+- PASS: Awaiting authorization is a busy state, not disconnected
+- PASS: CommonEvent routes connected to the current bundle and updates runtime
+- PASS: Traffic event reaches the same runtime instance
+- PASS: Extension log forwarding does not call LogStore recursively
+- PASS: Disconnect clears runtime ID and speeds
+- PASS: Direct mirror keeps the UI runtime correct even when the event is not delivered
+- PASS: Live traffic recovery uses the requested profile ID
+- PASS: Two rapid start taps issue exactly one extension request
+- PASS: Switch preserves original Want profileId and forceRestart contract
+- PASS: Stop uses extension stop and reaches disconnected
+- PASS: Data callback runs after profiles, groups and subscriptions finish loading
+- PASS: Selecting another node notifies without navigation or timers
+- PASS: Runtime status reaches AppState mirror fields and page listeners
+- PASS: Traffic samples mirror into the @Trace fields users read
+- PASS: Disconnect clears the mirror so the home page shows 未连接
+- PASS: Settings callback sees the committed new value
+- PASS: Cold start restores the persisted selection instead of the first row
+- PASS: Importing while a group is selected files the nodes into that group
+- PASS: Importing a subscription URL never silently promotes a basic group
+- PASS: Orphan nodes are adopted into an unnamed group on cold start
+- PASS: Importing with no group creates the unnamed group and files the node there
+- PASS: Demoting a subscription group keeps the nodes and drops the subscription
+- PASS: Renaming a subscription group retargets its SubInfo group name
+- PASS: Creating a group with an existing name is rejected instead of mutating it
+- PASS: A second subscription group cannot reuse the same URL
+- PASS: Subscription update reports the real diff instead of equal add/remove counts
+- PASS: An unchanged subscription says so instead of echoing equal counts
+- PASS: Selection moves between stable lazy rows without rebuilding the source
+- PASS: Editing a plain Profile replaces its traced row snapshot
+- PASS: Status experiment code and UI polling are absent
+- PASS: Group tabs are groups only and the subscription card needs a real subscription
+- PASS: Every bindSheet uses two-way binding so it can reopen after a tap-outside close
+- PASS: Destructive actions ask for confirmation first
+- PASS: Group settings panel follows the group type
+- PASS: Updating a subscription never invents a domain-named group
+- PASS: Deleting a group deletes its nodes instead of re-homing them
+- PASS: Breakpoints are compared in vp and the side panel needs a tablet-sized window
+- PASS: Shell: narrow drawer, in-shell sections, permanent left panel on tablets
+- PASS: Shell pages are in-shell components without HDS title bars
+- PASS: Handedness: operating hand wins, no centre docking, right by default
+- PASS: Home page floats the connect button and hides the status card until connected
+- PASS: Settings value pickers use the system Select with immersive material
+- PASS: Page header is two stacked layers (title slides, icons fly out and back)
+- PASS: Content reaches the physical screen bottom (full-screen + root ignore)
+- PASS: App icon is a single flat 1024 tile (no layered white-card foreground)
+- PASS: Group switch rebuilds the list, and selectors animate
+- PASS: Theme colour, splash icon, app icon reuse and secondary-page title
+- PASS: No hand-holding copy in the UI (power users only)
+- PASS: Handedness: enable then disable before the deferred task runs never subscribes
+- PASS: Handedness: disabled state ignores stray events; enabled state follows them
+- PASS: Handedness: repeated toggling never double-subscribes
+- PASS: Row model keeps identity while selected state flips (list refresh contract)
+- PASS: Hand-awareness default-off migration runs exactly once
+- PASS: PageHeader cancels stale hand-change animations (source-level guard)
+- PASS: All ETS sources meet the V2 and Navigation constraints

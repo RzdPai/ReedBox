@@ -1,0 +1,16 @@
+﻿{
+  "modelVersion": "6.1.1",
+  "dependencies": {
+    "@ohos/hvigor": "file:D:/command-line-tools/hvigor/hvigor",
+    "@ohos/hvigor-ohos-plugin": "file:D:/command-line-tools/hvigor/hvigor-ohos-plugin"
+  },
+  "properties": {
+    "hvigor.dependency.useNpm": false,
+    "ohos.pack.compressLevel": "standard"
+  },
+  "execution": {},
+  "logging": {},
+  "debugging": {},
+  "nodeOptions": {}
+}
+

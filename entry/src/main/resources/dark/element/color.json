@@ -1,0 +1,197 @@
+{
+  "color": [
+    {
+      "name": "start_window_background",
+      "value": "#0E0E0F"
+    },
+    {
+      "name": "app_background",
+      "value": "#0E0E0F"
+    },
+    {
+      "name": "surface",
+      "value": "#1A1A1B"
+    },
+    {
+      "name": "surface_selected",
+      "value": "#2C2C2E"
+    },
+    {
+      "name": "primary",
+      "value": "#6EA1FF"
+    },
+    {
+      "name": "primary_pressed",
+      "value": "#4E86ED"
+    },
+    {
+      "name": "text_primary",
+      "value": "#F2F4F7"
+    },
+    {
+      "name": "text_secondary",
+      "value": "#A0A3A8"
+    },
+    {
+      "name": "divider",
+      "value": "#3A3A3C"
+    },
+    {
+      "name": "success",
+      "value": "#4CCB7F"
+    },
+    {
+      "name": "warning",
+      "value": "#FFB547"
+    },
+    {
+      "name": "error",
+      "value": "#FF6B61"
+    },
+    {
+      "name": "protocol_vmess",
+      "value": "#A78BFA"
+    },
+    {
+      "name": "protocol_vless",
+      "value": "#60A5FA"
+    },
+    {
+      "name": "protocol_trojan",
+      "value": "#F472B6"
+    },
+    {
+      "name": "protocol_shadowsocks",
+      "value": "#22D3EE"
+    },
+    {
+      "name": "protocol_hysteria2",
+      "value": "#FB923C"
+    },
+    {
+      "name": "protocol_tuic",
+      "value": "#4ADE80"
+    },
+    {
+      "name": "text_disabled",
+      "value": "#7A7D82"
+    },
+    {
+      "name": "control_disabled",
+      "value": "#4A5568"
+    },
+    {
+      "name": "shadow_color",
+      "value": "#66000000"
+    },
+    {
+      "name": "power_icon",
+      "value": "#17181A"
+    },
+    {
+      "name": "btn_ring",
+      "value": "#282828"
+    },
+    {
+      "name": "btn_glow",
+      "value": "#2E2E2E"
+    },
+    {
+      "name": "bg_page",
+      "value": "#0E0E0F"
+    },
+    {
+      "name": "mono",
+      "value": "#F2F3F5"
+    },
+    {
+      "name": "text_1",
+      "value": "#ECEDEF"
+    },
+    {
+      "name": "text_2",
+      "value": "#9A9DA2"
+    },
+    {
+      "name": "text_3",
+      "value": "#8E9196"
+    },
+    {
+      "name": "hairline",
+      "value": "#232325"
+    },
+    {
+      "name": "hairline_2",
+      "value": "#262628"
+    },
+    {
+      "name": "dot_live",
+      "value": "#34D399"
+    },
+    {
+      "name": "ring_live",
+      "value": "#6634D399"
+    },
+    {
+      "name": "warn_fg",
+      "value": "#D6A15C"
+    },
+    {
+      "name": "fab_bg",
+      "value": "#FF6EA1FF"
+    },
+    {
+      "name": "fab_running",
+      "value": "#FF4CCB7F"
+    },
+    {
+      "name": "surface_2",
+      "value": "#242425"
+    },
+    {
+      "name": "brand_soft",
+      "value": "#2A2A2C"
+    },
+    {
+      "name": "on_brand",
+      "value": "#0B0D10"
+    },
+    {
+      "name": "ok_soft",
+      "value": "#17301F"
+    },
+    {
+      "name": "warn_soft",
+      "value": "#33260F"
+    },
+    {
+      "name": "danger_soft",
+      "value": "#33191A"
+    },
+    {
+      "name": "speed_up",
+      "value": "#C7CBD1"
+    },
+    {
+      "name": "speed_down",
+      "value": "#4CCB7F"
+    },
+    {
+      "name": "hero_from",
+      "value": "#2E2E30"
+    },
+    {
+      "name": "hero_to",
+      "value": "#1C1C1E"
+    },
+    {
+      "name": "hero_ink",
+      "value": "#F2F4FF"
+    },
+    {
+      "name": "hero_ink_sub",
+      "value": "#B9BDC4"
+    }
+  ]
+}
+

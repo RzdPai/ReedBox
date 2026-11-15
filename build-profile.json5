@@ -1,0 +1,54 @@
+{
+  "app": {
+    // 无签名基线：本机没有 com.rzdpai.nekobox 的证书材料 ⇒ 只产出未签名 HAP。
+    // 要装机就在 DevEco 里勾自动签名（它会往这里写一段本地 signingConfig，别提交）。
+    "signingConfigs": [],
+    /**
+     * 当前只有一套界面（用户 2026-11-01 定：先把一套做好，之后再拆皮肤）。
+     * ⚠️ hvigor 硬性要求存在一个名为 default 的 product，所以名字就叫 default。
+     * 将来要做第二套皮肤时：加一个 product（如 modern）+ `buildProfileFields.UI_STYLE`，
+     * 页树按常量选，别去维护两份 sourceRoots（见 README「两套界面怎么共存」）。
+     */
+    "products": [
+      {
+        "name": "default",
+        "compatibleSdkVersion": "6.1.1(24)",
+        "targetSdkVersion": "6.1.1(24)",
+        "runtimeOS": "HarmonyOS",
+        "buildOption": {
+          "externalNativeOptions": {
+            "path": "./entry/src/main/cpp/CMakeLists.txt",
+            "arguments": "",
+            "cppFlags": "",
+            "abiFilters": [
+              "arm64-v8a"
+            ]
+          }
+        }
+      }
+    ],
+    // 出包必须带 `-p buildMode=release`，否则产物 module.json 里是 debug:true（上架会被退回）。
+    "buildModeSet": [
+      {
+        "name": "debug"
+      },
+      {
+        "name": "release"
+      }
+    ]
+  },
+  "modules": [
+    {
+      "name": "entry",
+      "srcPath": "./entry",
+      "targets": [
+        {
+          "name": "default",
+          "applyToProducts": [
+            "default"
+          ]
+        }
+      ]
+    }
+  ]
+}
