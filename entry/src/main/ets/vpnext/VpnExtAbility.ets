@@ -75,6 +75,13 @@ export default class VpnExtAbility extends VpnExtensionAbility {
   private notificationFailStreak: number = 0;
   /** 本次会话流量落库的 promise（断开流程要等它写完再发 disconnected，见 awaitTrafficPersist） */
   private pendingTrafficPersist: Promise<void> | null = null;
+  /**
+   * 已经报过的启动失败原因（connect_failed 的那段文本）。
+   * ★ 系统在"用户拒绝 VPN 授权 / 授权框被划掉"之后会立刻销毁扩展 → `doTeardown()` 发 `disconnected`，
+   *   把刚发出去的失败原因原样盖掉：界面从「等待 VPN 授权…」直接跳到「未连接」，用户完全不知道是被拒了。
+   *   这里记住失败原因，teardown 时优先把它再报一次（同状态在 VpnRuntime 里去重，不会重复刷新）。
+   */
+  private pendingFailure: string = '';
   // 网络变化重置连接(功能对齐安卓 networkChangeResetConnections,2.0.2 起默认关)
   private netConnection: connection.NetConnection | null = null;
   private netChangeGeneration: number = 0;
@@ -353,7 +360,13 @@ export default class VpnExtAbility extends VpnExtensionAbility {
     this.starting = false;
     await this.awaitTrafficPersist();
     if (!silent) {
-      publishVpnStatus('disconnected', false);
+      // 失败过的会话：teardown 也要把原因留着，别用一句 disconnected 盖掉（见 pendingFailure）
+      const failure: string = this.pendingFailure;
+      if (failure.length > 0) {
+        publishVpnStatus(`connect_failed:${failure}`, false);
+      } else {
+        publishVpnStatus('disconnected', false);
+      }
     }
   }
 
@@ -367,6 +380,7 @@ export default class VpnExtAbility extends VpnExtensionAbility {
     // onCreate/onRequest 会在同一瞬间连发,否则会出现双重启动互拆
     this.starting = true;
     this.restartRequested = false;
+    this.pendingFailure = '';
     const generation = ++this.lifecycleGeneration;
     try {
       const context: common.Context = this.context;
@@ -404,6 +418,7 @@ export default class VpnExtAbility extends VpnExtensionAbility {
       this.cancelNotification();
       await clearPendingProfileId();
       await this.teardown(true);
+      this.pendingFailure = msg;
       publishVpnStatus(`connect_failed:${msg}`, false);
     } finally {
       this.starting = false;
@@ -604,6 +619,7 @@ export default class VpnExtAbility extends VpnExtensionAbility {
     this.currentNodeName = node.name;
     await setRunningProfileId(pendingId);
     this.notificationLatencyMs = -1;
+    this.pendingFailure = '';
     publishVpnStatus(`connected:${node.name}`, true, pendingId);
     this.startNotificationTrafficPoller();
     void this.showConnectedNotification(node.name, -1);

@@ -1494,7 +1494,7 @@ Existing notification files reviewed:
 - 产物已同时放到 GitHub Release 资产与 WebDAV(`ReedBox-unsigned.hap`,回读哈希一致)。
 - 未上机:关于页两条入口的实际观感、设备上能否连到 `api.github.com`(国内网络可能失败 —— 失败会明确报错,不会假报"已是最新")。
 
-## 2026-11-17 远程排查"启动不了"：把 UI 层动作写进日志 + 失败原因翻成人话(0.5.61)
+## 2026-11-17 远程排查"启动不了"：把 UI 层动作写进日志 + 失败原因翻成人话(0.5.61 · **已于 0.5.62 回退**)
 
 用户转来一个陌生用户的日志截图,说"启动不了,像是授权问题"。日志只有 10 行:
 
@@ -1540,3 +1540,46 @@ Existing notification files reviewed:
   GitHub Release `v0.5.61` 资产 + WebDAV `ReedBox-unsigned.hap` 同步。
 - 自检 75/75 PASS(本轮没动状态链,只加了日志/提示)。
 - 下一步要请对方做的事:清空日志 → 点右下角连接 → 再截一张(现在会带 `[ui] 点击连接…` 和失败原因)。
+
+## 2026-11-17 回退 0.5.61 的诊断日志 + 修"失败原因被盖掉"(0.5.62)
+
+甲方:"先别用多余的日志,回退到上一个版本"。同时补充了现场信息:**视频里点按钮后,底部提示走到「等待 VPN 授权…」,
+随后直接变回"未开启"**。
+
+### 一、回退
+
+- `git checkout 0.5.60 -- VpnService.ets EntryAbility.ets ProfilesPage.ets`:撤掉 `[ui] 点击连接…`、操作被忽略留痕、
+  失败 toast、`startErrorText()` 错误码翻译、45s 提示 watchdog、通知权限那句补充说明。
+- GitHub 上把 0.5.61 的 release/tag 一并删掉(诊断包不再对外),0.5.62 只保留下面这一条真修复。
+
+### 二、视频里那两条状态说明了什么
+
+- `awaiting_auth` 只有一处会发:`VpnExtAbility.startVpn()` 里 `vpnConnection.create(config)` **之前那行**
+  (日志:`[vpn] 正在创建 VPN 隧道(如弹出授权框请点「允许」)…`)。所以"等待 VPN 授权"= 系统授权框已经拉起、我们在等 `create()` 返回。
+- 之后回到"未开启"(=`disconnected`),只可能是扩展被销毁后的 `doTeardown()` 发的。也就是:
+  **授权被拒/授权框被划掉/系统拒绝创建** 三种之一 —— 这正好对应 `create()` 的两类失败
+  (`2203001 VPN creation denied` / `2203002 VPN exist already`)。
+
+### 三、真正的 bug:失败原因被 teardown 覆盖了
+
+- `tryStart()` 的 catch 会 `publishVpnStatus('connect_failed:<原因>')`;但系统在拒绝授权后会**紧接着销毁扩展**,
+  `onDisconnect/onDestroy → doTeardown()` 里的 `publishVpnStatus('disconnected')` **后发制人**,把失败原因盖掉。
+  于是界面就是"等待授权 → 未开启",用户与远程排查都拿不到原因。
+- 修法(`vpnext/VpnExtAbility.ets`):新增 `pendingFailure`,失败时记下原因,`doTeardown()` 在非静默路径上
+  **优先重报 `connect_failed:<原因>`**,只有从来没失败过才发 `disconnected`;新一次启动尝试开始、以及连上之后都清空。
+  同状态在 `VpnRuntime.setStatus` 里去重,不会重复刷新。
+- 效果:以后遇到"授权没点/被拒/另一个 VPN 占着",界面停在**「连接失败」**而不是莫名"未连接",
+  具体原因在日志页那行 `[vpn-state] status=connect_failed:…` 里(这是既有日志,没有新增)。
+
+### 四、交付
+
+- 版本 0.5.61 → **0.5.62 / 500062**;unsigned HAP 15,511,721 字节,
+  SHA256 `9E4590B82CC59F6B7393F60D6237E275375DC00D5451BF903A59B83BDEAD2516`;
+  WebDAV `ReedBox-unsigned.hap` 覆盖,GitHub Release `v0.5.62` 资产同步。0.5.60 的包和 release 保留(可回退)。
+- 自检 75/75 PASS;未上机。
+
+### 五、下次让对方看的
+
+1. 点连接 → 授权框有没有出来?点的是「允许」还是「拒绝/划掉」?
+2. 界面最后停在「连接失败」还是「未连接」;`日志` 页搜 `connect_failed` 看具体原因。
+3. 手机上是否还开着别的 VPN/加速器(鸿蒙只允许一个 VPN 服务)。

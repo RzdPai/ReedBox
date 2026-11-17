@@ -14,7 +14,6 @@ import { exportProfileLink } from '../../utils/LinkExporter';
 import { LatencyTestOutcome } from '../../utils/LatencyTester';
 import { buildOutboundJson } from '../../core/ConfigBuilder';
 import { getClipboardText, setClipboardText } from '../../utils/ClipboardHelper';
-import { LogStore } from '../../model/Store';
 import {
   confirmDestructive,
   GlowButton,
@@ -382,7 +381,6 @@ export struct ProfilesPage {
     next.buttonColor = next.running && !next.busy ? Theme.OK : Theme.BRAND;
     const stateChanged: boolean = this.runtimeView.status !== next.status || this.runtimeView.running !== next.running;
     this.runtimeView = next;
-    this.reportFailure(next.status);
     const canSelect: boolean = !next.busy;
     const showAddress: boolean = this.app.settings.alwaysShowAddress;
     if (this.lastSelectedId !== this.app.selectedId || this.lastRunningId !== next.runningId
@@ -458,10 +456,6 @@ export struct ProfilesPage {
     if (this.commandPending || this.runtime.isBusy()) {
       hilog.info(DOMAIN, TAG, '[profiles-runtime] ignored command=%{public}s status=%{public}s',
         action, this.runtime.vpnStatus);
-      // ★ 日志页只显示 LogStore：hilog 里那些"被忽略"的判断在用户截图里完全看不见，
-      //   远程排查时表现就是"点了没反应"。这里同步写一行，并给用户一个明确的提示。
-      LogStore.addLog(`[ui] 操作被忽略：${action}（当前状态 ${this.runtime.vpnStatus}）`);
-      this.toast(this.runtime.isBusy() ? `正在${this.runtime.statusText()}，请稍候` : '上一个操作还没结束，请稍候');
       return false;
     }
     this.commandPending = true;
@@ -490,10 +484,7 @@ export struct ProfilesPage {
   }
 
   private async toggleVpn(): Promise<void> {
-    const target: Profile | undefined = this.app.selectedProfile();
-    LogStore.addLog(`[ui] 点击连接：running=${this.runtime.vpnRunning} status=${this.runtime.vpnStatus}`
-      + ` 节点=${target === undefined ? '(无)' : target.name}`);
-    if (!this.runtime.vpnRunning && target === undefined) {
+    if (!this.runtime.vpnRunning && this.app.selectedProfile() === undefined) {
       this.toast('先导入或新建一个节点');
       return;
     }
@@ -1257,25 +1248,6 @@ export struct ProfilesPage {
   private onRuntimeChanged = (): void => {
     this.syncRuntimeView();
   };
-
-  /** 上一次已经提示过的失败状态（同一句失败只弹一次） */
-  private reportedFailure: string = '';
-
-  /**
-   * 连接失败的原因直接弹给用户看（原来只有底部一行"连接失败"，原因藏在日志里）。
-   * 远程排查时用户截一张 toast 就能说清是哪种失败：授权被拒 / 另一个 VPN 占着 / 扩展起不来。
-   */
-  private reportFailure(status: string): void {
-    if (!status.startsWith('start_failed:') && !status.startsWith('connect_failed:')) {
-      this.reportedFailure = '';
-      return;
-    }
-    if (status === this.reportedFailure) {
-      return;
-    }
-    this.reportedFailure = status;
-    this.toast(status.substring(status.indexOf(':') + 1));
-  }
 
   @Builder
   private groupPage(group: ProfileGroup | undefined, showAll: boolean) {
