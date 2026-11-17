@@ -1731,3 +1731,59 @@ keytool -importcert -alias rzdpai           -file leaf.pem         …   # 叶�
 | `dist/ReedBox-unsigned.hap`(debug，侧载) | 15,512,597 B | `CED285F43DA7681CD7B861B058C76531AC33448164E10682C3D6324A3DDA5571` |
 
 三个都传到 WebDAV 根（覆盖同名），回读哈希一致；**没有发 GitHub Release**。
+
+## 2026-11-17 上架被退：用 Beta SDK 构建 → 切到 Release SDK 重出签名包(0.5.65)
+
+甲方提交审核被拒：**"经检测发现，您的应用使用了 HarmonyOS beta 版本的 API"**，要求集成 release 版 API。
+
+### 一、根因
+
+本机默认工具链 `/root/command-line-tools` 带的是 **26.0.1.120 Beta1** SDK：
+
+```
+/root/command-line-tools/sdk/default/openharmony/ets/oh-uni-package.json
+{ "apiVersion":"26", "platformVersion":"26.0.1", "releaseType":"Beta1", "version":"26.0.1.120" }
+```
+
+打到 HAP 里的 `module.json` 会原样写 `"compileSdkVersion":"26.0.1.120"` + **`"apiReleaseType":"Beta1"`** ——
+AGC 就是看这个字段判"用了 beta API"（跟签名、和 buildMode=release 都无关）。
+
+### 二、本机还有一套 Release SDK（之前一直没用上）
+
+```
+/root/ct2600/command-line-tools/sdk/default/openharmony/ets/oh-uni-package.json
+{ "apiVersion":"26", "platformVersion":"26.0.0", "releaseType":"Release", "version":"26.0.0.105" }   # hvigor 6.26.9
+```
+
+### 三、改法：只用另一套 hvigorw 出包即可（工程配置不用动）
+
+```
+/root/ct2600/command-line-tools/bin/hvigorw assembleHap --mode module -p product=default -p buildMode=release --no-daemon
+/root/ct2600/command-line-tools/bin/hvigorw assembleApp --mode project -p product=default -p buildMode=release --no-daemon
+```
+签名仍用 `.sign/RzdPai-release.p12` + `RzdPai.cer` + `ReedBoxRelease.p7b`（hap-sign-tool 也用 ct2600 里那份，
+其实两套工具签出来一样，只是图个一致）。版本 0.5.64 → **0.5.65 / 500065**（AGC 那边 500064 已经用过，避免"版本已存在"）。
+
+### 四、验证（这次专门盯 AGC 会看的字段）
+
+`.app` 内层 HAP 的 `module.json`：
+
+```
+version = 0.5.65 500065
+compileSdkVersion = 26.0.0.105
+apiReleaseType    = Release          ← 关键，之前是 Beta1
+debug / buildMode = False / release  ← 上架也要这个（见 2.0.3 那节）
+minAPIVersion     = 60101024（compatible 仍是 6.1.1(24)，装机门槛没变）
+permissions       = INTERNET / GET_NETWORK_INFO / KEEP_BACKGROUND_RUNNING / GET_BUNDLE_INFO / DETECT_GESTURE
+```
+两层 `verify-app` 均 `Verify success`；`pack.info` 版本 `0.5.65(500065)`。
+
+### 五、产物（已覆盖 WebDAV）
+
+| 文件 | 大小 | SHA256 |
+| --- | --- | --- |
+| `dist/ReedBox-signed.app` | 13,544,641 B | `9CF0C7A012436100896914672EB3CC4DF3F9031ED9000F0822385AC5B8895F9D` |
+| `dist/ReedBox-signed.hap` | 14,276,706 B | `0D4745301057B1F24A5D2F90A99B926D2BA1ABDA3D4D85327ED87F7A242BA503` |
+| `dist/ReedBox-unsigned.hap`(debug) | 15,512,600 B | `EB5E2E13AC50960412225783466F2A246294A9D3A63F2BF0299AC288995FF579` |
+
+没发 GitHub Release。

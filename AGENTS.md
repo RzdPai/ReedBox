@@ -11,7 +11,7 @@ c-shared `.so`，进程内 `dlopen`，TUN fd 由 `VpnExtensionAbility` 直接交
 
 - 显示名 **ReedBox**、仓库 **https://github.com/RzdPai/ReedBox**（2026-11-16 改名/开源）；目录仍叫 `RzdBox/`
 - bundleName **`com.rzdpai.nekobox`**（**没跟着改名**：改它等于装一个新应用，老数据不迁；见项目记忆第六十三轮 A）
-- versionName **0.5.64** / versionCode **500064**（以 `AppScope/app.json5` 为准）
+- versionName **0.5.65** / versionCode **500065**（以 `AppScope/app.json5` 为准）
 - compatible/target **6.1.1(24)**，deviceTypes phone/tablet
 - 状态管理**全 V2**、路由**只走 Navigation**、UI 组件优先 HDS —— 这三条是硬规则，别回退。
 
@@ -43,6 +43,11 @@ cd /root/Project/RzdBox
 - 自检：`node tools/check-state-chain.cjs`（typescript 路径可用 `TS_LIB=<path>` 覆盖）。
 - 历史 Windows 流程（保留备用）：`powershell -File tools\build.ps1 -Product default`，
   必须用 `D:\command-line-tools\bin\hvigorw.bat`；系统 `node hvigorw.js` 会 `MODULE_NOT_FOUND`。
+- **上架包必须用 Release SDK**：本机还有一套 `/root/ct2600/command-line-tools`（SDK 26.0.0.105 **Release**），
+  出上架包时把 `hvigorw` 换成 `/root/ct2600/command-line-tools/bin/hvigorw` 即可（工程配置不用动）。
+  默认那套 `/root/command-line-tools` 的 SDK 是 26.0.1.120 **Beta1**，打出来的包 `apiReleaseType: Beta1`，
+  AGC 会以「使用了 HarmonyOS beta 版本的 API」退回（2026-11-17 实测）。
+  判据：`unzip -p <hap> module.json` 里 `apiReleaseType` 必须是 `Release`、`debug` 必须是 `false`。
 - product 名必须是 `default`（hvigor 硬性要求有一个叫 default 的 product）+ `modern`。
 - 产物在 `entry/build/<product>/outputs/default/`；拷进 `dist/` 时按产品名分开放。
 - 仓库无签名配置，只能出未签名 HAP；要装机走 DevEco 自动签名（或 AGC 证书 + `hap-sign-tool`）。
