@@ -1493,3 +1493,50 @@ Existing notification files reviewed:
 - 用真实 GitHub 返回的 JSON 对过一遍:只有 `v0.5.60` 一条、正式/预览都选它、当前 0.5.59 判"有更新"、当前 0.5.60 判"已是最新"。
 - 产物已同时放到 GitHub Release 资产与 WebDAV(`ReedBox-unsigned.hap`,回读哈希一致)。
 - 未上机:关于页两条入口的实际观感、设备上能否连到 `api.github.com`(国内网络可能失败 —— 失败会明确报错,不会假报"已是最新")。
+
+## 2026-11-17 远程排查"启动不了"：把 UI 层动作写进日志 + 失败原因翻成人话(0.5.61)
+
+用户转来一个陌生用户的日志截图,说"启动不了,像是授权问题"。日志只有 10 行:
+
+```
+[app] ReedBox 启动
+[app] 通知权限未授予：1600001
+[vpn-ipc] subscriber registered receiver=com.rzdpai.nekobox
+[ui] breakpoint=compact w=379vp h=821vp short=379vp   (两遍)
+[app] 主题色与色彩模式不一致（资源=#FAFAF9, dark=true），按常量兜底
+[app] 窗口外观：bg=#0E0E0F dark=true
+[ui] 状态初始化完成：节点 292，分组 2，订阅 2，选中 sub_f1c4db68，页签 grp_1794545725248_24598
+----- core -----
+```
+
+### 读日志的结论
+
+- **应用本身起来了**:数据全加载完(292 节点 / 2 分组 / 2 订阅)、上次的选中节点与分组页签都恢复了;内核日志段是空的(sing-box 一次都没跑过)。
+- **这份日志里没有任何"发起连接"的痕迹**:没有 `[vpn-control] start request`、没有扩展进程的 `[vpn] …`、
+  也没有 `start_failed:`/`connect_failed:`。也就是说 `VpnService.connect()` 根本没被调用到 —— 要么还没点右下角那颗纸飞机,
+  要么点了但界面在动手之前就返回了。
+- 而"界面在动手之前返回"的路径**以前只写 `hilog`,日志页只显示 `LogStore`**,所以用户截图里什么都看不到 —— 这是本次要补的盲区。
+- 两行看着吓人的其实无害:`通知权限未授予：1600001` 是 `notificationManager` 的"系统内部错误"(不是用户拒绝),通知只管状态栏速率;
+  `主题色与色彩模式不一致…按常量兜底` 是 `setColorMode` 异步生效时的预期分支。
+
+### 本轮改动(全部是"让下一次日志能说清问题")
+
+- `ui/neko/ProfilesPage.ets`
+  - 点连接先留痕:`[ui] 点击连接：running=… status=… 节点=…`(以后能区分"点了"和"没点");
+  - 操作被忽略(命令未结束/正在连接)时写 `[ui] 操作被忽略：…（当前状态 …）` 并 toast,不再静默 return;
+  - **失败原因直接弹出来**:`start_failed:/connect_failed:` 一到就给用户一句 toast(同一句只弹一次),不用再翻日志。
+- `core/VpnService.ets`
+  - 新增 `startErrorText()`:把 `startVpnExtensionAbility`/创建隧道的错误码翻成人话 ——
+    201 权限、16000001 找不到扩展、16000002 类型不对、16000011 上下文没了、16000050 系统内部错误、
+    16200001 调用方被释放、2203001 系统拒绝、**2203002 已经有一个 VPN 在运行(先断开其它 VPN/加速器)**;
+  - 45s 仍没收到扩展任何回调时写一条可截图的提示(常见真因:授权弹窗没出来/被划掉、本应用没被信任、别的 VPN 占着唯一槽位);
+  - watchdog 统一在 `clearWatchdogs()` 里清掉。
+- `entryability/EntryAbility.ets`:通知权限失败那行补一句"不影响 VPN 连接,只是没有常驻通知",免得排查时被带偏。
+
+### 交付
+
+- 版本 0.5.60 → **0.5.61 / 500061**;unsigned HAP 15,517,845 字节,
+  SHA256 `771CB94111C1180E06F127342B8FAE349F136213A61121972324909E09AAB479`;
+  GitHub Release `v0.5.61` 资产 + WebDAV `ReedBox-unsigned.hap` 同步。
+- 自检 75/75 PASS(本轮没动状态链,只加了日志/提示)。
+- 下一步要请对方做的事:清空日志 → 点右下角连接 → 再截一张(现在会带 `[ui] 点击连接…` 和失败原因)。

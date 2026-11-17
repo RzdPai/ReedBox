@@ -270,7 +270,9 @@ export default class EntryAbility extends UIAbility {
     try {
       notificationManager.requestEnableNotification(this.context, (err: BusinessError) => {
         if (err && err.code !== 0) {
-          LogStore.addLog(`[app] 通知权限未授予：${err.code}`);
+          // 1600001 是系统内部错误（不是用户拒绝）。通知只是用来显示连接状态与速率，
+          // 拿不到也不影响 VPN 连接与代理本身 —— 排查时别被这行带偏。
+          LogStore.addLog(`[app] 通知权限未授予：${err.code}（不影响 VPN 连接，只是没有常驻通知）`);
         }
       });
     } catch (e) {
