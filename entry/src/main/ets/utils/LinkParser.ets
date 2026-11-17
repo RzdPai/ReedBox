@@ -295,7 +295,9 @@ function applyQueryTls(p: Profile, q: Record<string, string>): void {
   p.allowInsecure = qbool(q, 'allowInsecure') || qbool(q, 'insecure');
   p.alpn = qstr(q, 'alpn');
   p.fingerprint = qstr(q, 'fp');
-  p.flow = qstr(q, 'flow');
+  const rawFlow = qstr(q, 'flow').trim().toLowerCase();
+  // 只认内核支持的两种(有的订阅转换会把 flow 写成 null/空)
+  p.flow = (rawFlow === 'xtls-rprx-vision' || rawFlow === 'xtls-rprx-vision-udp443') ? rawFlow : '';
 }
 
 function applyTransport(p: Profile, q: Record<string, string>): void {

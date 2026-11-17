@@ -1583,3 +1583,51 @@ Existing notification files reviewed:
 1. 点连接 → 授权框有没有出来?点的是「允许」还是「拒绝/划掉」?
 2. 界面最后停在「连接失败」还是「未连接」;`日志` 页搜 `connect_failed` 看具体原因。
 3. 手机上是否还开着别的 VPN/加速器(鸿蒙只允许一个 VPN 服务)。
+
+## 2026-11-17 找到真因：订阅里的 `flow: null` 把 VLESS 出站写坏了(0.5.63)
+
+甲方:"那个问题找到了,是 `https://xingji.win/s/...` 这个订阅中的 vless 无法连接,但 `https://edge.rzdproxy.dpdns.org/RzdPai`
+这个订阅中的 vless 又正常";同时要求"把刚才那个(上一轮的 pendingFailure 修补)也去掉",以及
+**"release 不要擅自发布,只有我说时才发布"**。
+
+### 一、回退
+
+- `vpnext/VpnExtAbility.ets` 的 `pendingFailure`(失败原因跨 teardown 保留)整段撤掉,代码回到 0.5.60 的状态。
+- 顺手删掉擅自发的 GitHub Release `v0.5.62`(含 tag);`v0.5.60` 保留(要删也一句话的事)。
+- **规矩记下来了**:以后只出未签名 HAP + 传 WebDAV,**GitHub Release 只在明确要求时发**。
+
+### 二、真因(实际拉了两个订阅对比出来的)
+
+| | xingji(连不上) | edge(正常) |
+| --- | --- | --- |
+| vless 条目 | 14 条,**12 条带 `flow: null`**、1 条 `flow: xtls-rprx-vision`、1 条 `network: xhttp` | 30 条,**完全不写 `flow`**,全是 `network: ws` |
+
+- 我们的 Clash YAML 解析器把 `flow: null` 当成普通标量 → `Profile.flow = "null"`(字符串),
+  `ConfigBuilder` 又原样写成 `"flow": "null"`。sing-box 的 VLESS 只接受 `""` / `xtls-rprx-vision`
+  (`vless.NewClient` 里直接报 `unknown flow`),这条出站创建失败。
+  因为配置只生成"当前选中节点"的那条链(`buildProfileGraph`),**选中这种节点 → 内核启动失败 → 连不上**;
+  换一家不写 flow 的订阅,同一套代码就正常 —— 与甲方的现象完全对得上。
+- 另外 `network: xhttp`(德国 08)是 Xray 专有传输,sing-box 的 v2ray 传输只有 `http/ws/quic/grpc/httpupgrade`
+  (`option/v2ray_transport.go` 里 `enum:"http,ws,quic,grpc,httpupgrade"`)。这种值会被写成
+  `"transport": {"type": "xhttp"}`;`buildTransport` 的 `default` 分支本来就丢掉未知类型,
+  所以没炸整个配置,但这个节点注定连不上。
+
+### 三、修法(三层,任何一层单独都能挡住这类脏数据)
+
+1. `utils/Subscription.ets`
+   - `yStrOf()`:YAML 的 `null / Null / NULL / ~` 一律当空字符串(**根因修复**);
+   - vless 分支:`p.flow = kernelFlow(...)`,只认 `xtls-rprx-vision` / `-udp443`;
+   - `applyClashTransport()`:`network` 不在 sing-box 白名单里时清空传输并**写一条日志**
+     (节点照收,不偷偷删;日志说明"该节点大概率连不上")。
+2. `core/ConfigBuilder.ets`:新增 `normalizeVlessFlow()`、`buildTransport()` 白名单 —— **绝不把内核不认识的值写进配置**。
+3. `utils/LinkParser.ets`:分享链接里的 `flow=` 同样清洗(手填/转换器带脏值也不会写出非法出站)。
+
+### 四、验证
+
+- 用**真实订阅**跑了一遍解析器(xingji):14 条 vless 全部 `flow: ""`(vision 那条保留),
+  `德国 08` 的传输被清空并打出日志;edge 的 30 条照旧 `flow: ""` + `ws`。
+- `buildOutbound` 实测:`flow="null"` → 不输出 flow;`xtls-rprx-vision` → 输出;`transport="xhttp"` → 不输出;
+  `ws` → 正常带 `path/headers`。
+- 自检 75 → **79** 项全 PASS(新增:null flow 不当字符串、flow 白名单、xhttp 清空且留日志、出站永不含脏值)。
+- 版本 **0.5.63 / 500063**,HAP 15,514,637 字节,
+  SHA256 `1BA22F699B99614286217F0385B760092C4D57EEB8545F6B740D157C8E2E7227`;只传 WebDAV(`ReedBox-unsigned.hap`)。

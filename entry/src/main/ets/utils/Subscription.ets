@@ -1,6 +1,7 @@
 import http from '@ohos.net.http';
 import { Profile, ProfileType } from '../model/Profile';
 import { parseYaml, hasTopLevelKey, YamlNode } from './ClashYaml';
+import { LogStore } from '../model/Store';
 
 /**
  * 订阅链接支持:
@@ -315,11 +316,21 @@ function yNode(m: YamlNode | null, key: string): YamlNode | null {
   return m.get(key);
 }
 
+/**
+ * ★ YAML 的 null 写法(`null` / `Null` / `NULL` / `~`)必须当空字符串。
+ * 起因(2026-11-17 甲方实测):某个订阅的 vless 全带 `flow: null`,我们把它读成字符串 "null",
+ * 生成出站时写成 `"flow": "null"` —— sing-box 只认 ""/"xtls-rprx-vision",于是这条出站创建失败,
+ * 选中该节点就整个连不上;另一家订阅压根不写 flow,同一套代码就正常。
+ */
 function yStrOf(n: YamlNode | null, dflt: string = ''): string {
   if (n === null || !n.isScalar()) {
     return dflt;
   }
-  return n.scalar;
+  const s = n.scalar.trim();
+  if (s === 'null' || s === 'Null' || s === 'NULL' || s === '~') {
+    return dflt;
+  }
+  return s;
 }
 
 function yStr(m: YamlNode | null, key: string, dflt: string = ''): string {
@@ -423,10 +434,33 @@ function yHeader(oo: YamlNode | null, keys: Array<string>): string {
   return '';
 }
 
+/** sing-box 只认这两种 flow(其余写法会让出站直接创建失败) */
+export function kernelFlow(raw: string): string {
+  const v = raw.trim().toLowerCase();
+  if (v === 'xtls-rprx-vision' || v === 'xtls-rprx-vision-udp443') {
+    return v;
+  }
+  return '';
+}
+
+/** sing-box 1.14 支持的 v2ray 传输(见核心 constant/v2ray.go);其余写了也没用 */
+const KERNEL_TRANSPORTS: Array<string> = ['ws', 'grpc', 'http', 'quic', 'httpupgrade'];
+
 function applyClashTransport(p: Profile, m: YamlNode): void {
   const net = yStr(m, 'network');
   // Clash 的 h2 对应 sing-box 的 http 传输
   p.transport = (net === '' || net === 'tcp' || net === 'none') ? '' : (net === 'h2' ? 'http' : net);
+  if (p.transport.length > 0 && KERNEL_TRANSPORTS.indexOf(p.transport) < 0) {
+    // sing-box 没有 xhttp/splithttp/mkcp 这些(Xray 专有)。节点照收(别悄悄删用户的节点),
+    // 但按"无传输"下发,并在日志里点明连不上是预期的,免得以为是别的问题。
+    LogStore.addLog(`[sub] 节点「${p.name}」使用 sing-box 不支持的传输 ${p.transport}，`
+      + `已按无传输导入（该节点大概率连不上）`);
+    p.transport = '';
+    p.path = '';
+    p.host = '';
+    p.serviceName = '';
+    return;
+  }
   const oo = yNode(m, `${net}-opts`);
   if (net === 'ws') {
     if (oo === null || !oo.isMap()) {
@@ -536,7 +570,7 @@ function profileFromClash(m: YamlNode | null): Profile | null {
     case 'vless':
       p.type = ProfileType.VLESS;
       p.uuid = yStr(m, 'uuid');
-      p.flow = yStr(m, 'flow');
+      p.flow = kernelFlow(yStr(m, 'flow'));
       p.tls = yBool(m, 'tls') || p.sni.length > 0 || yNode(m, 'reality-opts') !== null;
       p.packetEncoding = yStr(m, 'packet-encoding');
       applyClashReality(p, m);

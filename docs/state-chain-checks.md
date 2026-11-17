@@ -76,4 +76,8 @@ Validation: source/host logic only. ArkUI decorators are stripped for the mock h
 - PASS: Only a strictly newer release counts as an update
 - PASS: A rate-limit or error payload is not mistaken for a release list
 - PASS: The about page actually calls the checker for both channels
+- PASS: A YAML null flow is not imported as the literal string "null"
+- PASS: Only kernel-known VLESS flows survive import
+- PASS: An unsupported transport is neutralised at import, the node is kept and explained in the log
+- PASS: The generated outbound never emits a bogus flow or transport type
 - PASS: All ETS sources meet the V2 and Navigation constraints

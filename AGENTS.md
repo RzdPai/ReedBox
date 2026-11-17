@@ -11,7 +11,7 @@ c-shared `.so`，进程内 `dlopen`，TUN fd 由 `VpnExtensionAbility` 直接交
 
 - 显示名 **ReedBox**、仓库 **https://github.com/RzdPai/ReedBox**（2026-11-16 改名/开源）；目录仍叫 `RzdBox/`
 - bundleName **`com.rzdpai.nekobox`**（**没跟着改名**：改它等于装一个新应用，老数据不迁；见项目记忆第六十三轮 A）
-- versionName **0.5.62** / versionCode **500062**（以 `AppScope/app.json5` 为准）
+- versionName **0.5.63** / versionCode **500063**（以 `AppScope/app.json5` 为准）
 - compatible/target **6.1.1(24)**，deviceTypes phone/tablet
 - 状态管理**全 V2**、路由**只走 Navigation**、UI 组件优先 HDS —— 这三条是硬规则，别回退。
 
@@ -46,6 +46,13 @@ cd /root/Project/RzdBox
 - product 名必须是 `default`（hvigor 硬性要求有一个叫 default 的 product）+ `modern`。
 - 产物在 `entry/build/<product>/outputs/default/`；拷进 `dist/` 时按产品名分开放。
 - 仓库无签名配置，只能出未签名 HAP；要装机走 DevEco 自动签名（或 AGC 证书 + `hap-sign-tool`）。
+
+## 交付纪律（2026-11-17 甲方明确）
+
+- **不擅自在 GitHub 发 Release / 打 tag**：默认只产出未签名 HAP 并传 WebDAV（`ReedBox-unsigned.hap` 覆盖式上传）。
+  发版（release + 资产上传）只在甲方明确要求时做。
+- 甲方口中的"日志"包含给用户看的提示/toast —— 想加先问。
+- 报告里写清"改了什么、为什么、验证到哪一步"，别把诊断性改动混进正式包。
 
 ## 排查
 

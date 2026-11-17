@@ -110,8 +110,18 @@ function buildTls(p: Profile, s: AppSettings): Object | undefined {
   return tls;
 }
 
+/**
+ * sing-box 支持的 v2ray 传输类型。别的值一律不下发 ——
+ * 之前 `network: xhttp` 会原样写成 `"transport": {"type": "xhttp"}`,内核会直接报错。
+ * (解析层现在也会把不支持的传输清成空串,这里是最后一道闸。)
+ */
+const KERNEL_TRANSPORTS: Array<string> = ['ws', 'grpc', 'http', 'quic', 'httpupgrade'];
+
 function buildTransport(p: Profile): Object | undefined {
   if (!supportsTransport(p.type) || p.transport.length === 0) {
+    return undefined;
+  }
+  if (KERNEL_TRANSPORTS.indexOf(p.transport) < 0) {
     return undefined;
   }
   const t: Record<string, Object> = { 'type': p.transport };
@@ -152,6 +162,15 @@ function buildTransport(p: Profile): Object | undefined {
 }
 
 /** 导出供主机测试直接断言 extra 深合并结果(纯函数,无副作用)。 */
+/** 只保留 sing-box 认识的 VLESS flow,其余一律当"不设置" */
+function normalizeVlessFlow(raw: string): string {
+  const v = raw.trim().toLowerCase();
+  if (v === 'xtls-rprx-vision' || v === 'xtls-rprx-vision-udp443') {
+    return v;
+  }
+  return '';
+}
+
 export function buildOutbound(p: Profile, s: AppSettings, tag: string = 'proxy'): Record<string, Object> {
   const o: Record<string, Object> = {};
   o['tag'] = tag;
@@ -196,7 +215,9 @@ export function buildOutbound(p: Profile, s: AppSettings, tag: string = 'proxy')
       break;
     case ProfileType.VLESS:
       o['uuid'] = p.uuid;
-      setIf(o, 'flow', p.flow);
+      // 只发内核认识的 flow:sing-box 只接受 "" / xtls-rprx-vision(/ -udp443)。
+      // 脏数据(订阅里的 `flow: null`、手填错)会让整条出站创建失败 → 选中该节点就完全连不上。
+      setIf(o, 'flow', normalizeVlessFlow(p.flow));
       o['packet_encoding'] = p.packetEncoding.length > 0 ? p.packetEncoding : 'xudp';
       break;
     case ProfileType.TROJAN:

@@ -1149,6 +1149,68 @@ async function main() {
     assert.doesNotMatch(about, /暂未接入更新检查/);
   });
 
+  // ---- 订阅脏数据不能变成非法出站（甲方 2026-11-17：某订阅 vless 全带 flow: null，选中就整个连不上）----
+  const subLogs = [];
+  const clashYamlModule = load('utils/ClashYaml.ets', {});
+  const subscriptionModule = load('utils/Subscription.ets', {
+    '@ohos.net.http': {},
+    '../model/Profile': models,
+    './ClashYaml': clashYamlModule,
+    '../model/Store': { LogStore: { addLog(line) { subLogs.push(line); } } }
+  });
+  function clashYamlOne(entry) {
+    return `proxies:\n  - ${entry}\n`;
+  }
+  checked('A YAML null flow is not imported as the literal string "null"', () => {
+    const parsed = subscriptionModule.parseClashProxies(clashYamlOne(
+      "{ name: A, type: vless, server: 1.2.3.4, port: 443, uuid: u, flow: null, encryption: none, tls: true, "
+      + "network: ws, ws-opts: { path: /p, headers: { Host: a.example.com } } }"));
+    assert.equal(parsed.profiles.length, 1);
+    assert.equal(parsed.profiles[0].flow, '');
+    assert.equal(parsed.profiles[0].transport, 'ws');
+  });
+  checked('Only kernel-known VLESS flows survive import', () => {
+    assert.equal(subscriptionModule.kernelFlow('xtls-rprx-vision'), 'xtls-rprx-vision');
+    assert.equal(subscriptionModule.kernelFlow('xtls-rprx-vision-udp443'), 'xtls-rprx-vision-udp443');
+    assert.equal(subscriptionModule.kernelFlow(' null '), '');
+    assert.equal(subscriptionModule.kernelFlow('whatever'), '');
+  });
+  checked('An unsupported transport is neutralised at import, the node is kept and explained in the log', () => {
+    subLogs.length = 0;
+    const parsed = subscriptionModule.parseClashProxies(clashYamlOne(
+      "{ name: X, type: vless, server: 1.2.3.5, port: 443, uuid: u, tls: true, network: xhttp, xhttp-opts: { path: / } }"));
+    assert.equal(parsed.profiles.length, 1);
+    assert.equal(parsed.profiles[0].transport, '');
+    assert.ok(subLogs.some((line) => line.includes('xhttp')));
+  });
+  const routeRule = load('model/RouteRule.ets', { './Store': { LogStore: { addLog() {} } } });
+  const configBuilder = load('core/ConfigBuilder.ets', {
+    '../model/Profile': models,
+    '../utils/TrafficStats': { CLASH_API_PORT: 19290 },
+    '../model/RouteRule': routeRule
+  });
+  function vlessOutbound(flow, transport) {
+    const p = new models.Profile();
+    p.type = 'vless';
+    p.server = '1.2.3.4';
+    p.serverPort = 443;
+    p.uuid = 'u';
+    p.tls = true;
+    p.sni = 'a.example.com';
+    p.flow = flow;
+    p.transport = transport;
+    return configBuilder.buildOutbound(p, new models.AppSettings());
+  }
+  checked('The generated outbound never emits a bogus flow or transport type', () => {
+    const dirty = vlessOutbound('null', 'xhttp');
+    assert.equal(dirty['flow'], undefined);
+    assert.equal(dirty['transport'], undefined);
+    const vision = vlessOutbound('xtls-rprx-vision', '');
+    assert.equal(vision['flow'], 'xtls-rprx-vision');
+    const ws = vlessOutbound('', 'ws');
+    assert.equal(ws['transport']['type'], 'ws');
+  });
+
   // A filename match is not evidence of success: inspect every ETS file recursively.
   function files(dir) { return fs.readdirSync(dir, { withFileTypes: true }).flatMap(e => e.isDirectory() ? files(path.join(dir, e.name)) : [path.join(dir, e.name)]); }
   checked('All ETS sources meet the V2 and Navigation constraints', () => {
