@@ -1211,6 +1211,20 @@ async function main() {
     assert.equal(ws['transport']['type'], 'ws');
   });
 
+  // ---- 剪贴板：不声明受限权限，一律走官方安全控件（甲方 2026-11-17 要求删掉 READ_PASTEBOARD）----
+  checked('The restricted pasteboard permission is not declared, and reads go through PasteButton', () => {
+    const manifest = fs.readFileSync(path.join(ets, '..', 'module.json5'), 'utf8');
+    assert.doesNotMatch(manifest, /"ohos\.permission\.READ_PASTEBOARD"\s*[,}]/);
+    for (const rel of ['ui/neko/ProfilesPage.ets', 'ui/neko/ProfileEditPage.ets', 'ui/neko/SettingsTab.ets']) {
+      const text = source(rel);
+      assert.match(text, /PasteButton\(/, rel);
+      // 每个直接读剪贴板的调用都必须紧跟在 PasteButtonOnClickResult.SUCCESS 判断之后
+      const calls = text.split('getClipboardText()').length - 1;
+      const guards = text.split('PasteButtonOnClickResult.SUCCESS').length - 1;
+      assert.ok(guards >= calls, `${rel}: getClipboardText x${calls} 但只有 ${guards} 处授权判断`);
+    }
+  });
+
   // A filename match is not evidence of success: inspect every ETS file recursively.
   function files(dir) { return fs.readdirSync(dir, { withFileTypes: true }).flatMap(e => e.isDirectory() ? files(path.join(dir, e.name)) : [path.join(dir, e.name)]); }
   checked('All ETS sources meet the V2 and Navigation constraints', () => {

@@ -51,15 +51,10 @@
       { "name": "ohos.permission.KEEP_BACKGROUND_RUNNING" },
       { "name": "ohos.permission.GET_BUNDLE_INFO" },
       // 智感握姿(交互手/握持手):system_grant + normal,API 20 起,装上即用、无运行时弹窗
-      { "name": "ohos.permission.DETECT_GESTURE" },
-      {
-        "name": "ohos.permission.READ_PASTEBOARD",
-        "reason": "$string:permission_read_pasteboard_reason",
-        "usedScene": {
-          "abilities": ["EntryAbility"],
-          "when": "inuse"
-        }
-      }
+      { "name": "ohos.permission.DETECT_GESTURE" }
+      // ⚠️ 读剪贴板**不再申请** ohos.permission.READ_PASTEBOARD（受限 user_grant，要 AGC 申请 ACL +
+      //   每次弹窗授权）。改用官方安全控件 `PasteButton`：用户点一下控件即临时授权，读完不需要任何权限。
+      //   应用侧只保留"写剪贴板"（复制分享链接/备份），那个不需要权限。
       // 若系统提示缺少 VPN 权限,按 SDK 文档追加(可能属于受限 ACL,需在 AGC 申请):
       // { "name": "ohos.permission.MANAGE_VPN" }
     ]

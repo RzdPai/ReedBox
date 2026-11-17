@@ -24,3 +24,6 @@ hilog*.txt
 
 # 注意：entry/libs/arm64-v8a/libsingbox.so 是**冻结内核产物**（见 AGENTS.md），
 # 必须入库，不要加进忽略列表。
+
+# 签名材料（证书/密钥/证书请求/profile）永不入库
+.sign/

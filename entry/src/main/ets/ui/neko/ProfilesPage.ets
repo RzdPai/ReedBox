@@ -523,7 +523,7 @@ export struct ProfilesPage {
   private openCreateMenu(): void {
     const items: Array<MenuItemData> = [
       new MenuItemData('扫描二维码', false, $r('sys.symbol.scope')),
-      new MenuItemData('从剪贴板导入', false, $r('sys.symbol.doc_plaintext')),
+      new MenuItemData('粘贴文本', false, $r('sys.symbol.doc_plaintext')),
       new MenuItemData('从文件导入', false, $r('sys.symbol.doc_text')),
       new MenuItemData('手动设置 ▸', false, $r('sys.symbol.square_and_pencil'))
     ];
@@ -531,14 +531,10 @@ export struct ProfilesPage {
       if (index === 0) {
         this.scanQr();
       } else if (index === 1) {
-        getClipboardText().then((text: string) => {
-          this.importText = text;
-          this.sheetKind = 'import';
-          this.sheetOpen = true;
-          this.toast(text.trim().length > 0 ? '已读取剪贴板' : '剪贴板为空');
-        }).catch((e: Error) => {
-          this.toast(`读取剪贴板失败：${e.message}`);
-        });
+        // 不再直接读剪贴板(那需要受限权限)：打开面板，用面板里的粘贴控件取内容
+        this.importText = '';
+        this.sheetKind = 'import';
+        this.sheetOpen = true;
       } else if (index === 2) {
         this.importFromFile();
       } else if (index === 3) {
@@ -1132,20 +1128,18 @@ export struct ProfilesPage {
             this.importText = v;
           })
         Row({ space: 10 }) {
-          GlowButton({
-            label: '读取剪贴板',
-            grow: true,
-            buttonColor: Theme.SURFACE_2,
-            labelColor: Theme.TEXT_1,
-            onTap: () => {
-              getClipboardText().then((text: string) => {
-                this.importText = text;
-                this.toast(text.length > 0 ? '已读取剪贴板' : '剪贴板为空');
-              }).catch((e: Error) => {
-                this.toast(`读取剪贴板失败：${e.message}`);
-              });
-            }
-          })
+          // 读剪贴板用官方**安全控件**：用户点这一下就临时授权，应用不需要声明任何权限
+          // （ohos.permission.READ_PASTEBOARD 是受限权限，要 AGC 申请 ACL + 每次弹窗）。
+          PasteButton({ icon: PasteIconStyle.LINES, text: PasteDescription.PASTE, buttonType: ButtonType.Capsule })
+            .fontSize(14)
+            .constraintSize({ minWidth: 96, maxWidth: 132, minHeight: 40, maxHeight: 44 })
+            .onClick((event: ClickEvent, result: PasteButtonOnClickResult) => {
+              if (result === PasteButtonOnClickResult.SUCCESS) {
+                this.fillFromClipboard();
+              } else {
+                this.toast('没拿到剪贴板授权');
+              }
+            })
           GlowButton({
             label: this.busy ? '导入中…' : '导入',
             grow: true,
@@ -1201,6 +1195,20 @@ export struct ProfilesPage {
       }
     };
     return param;
+  }
+
+  /** PasteButton 授权成功后才读得到剪贴板；空内容也在这里提示 */
+  private fillFromClipboard(): void {
+    getClipboardText().then((text: string) => {
+      if (text.trim().length === 0) {
+        this.toast('剪贴板为空');
+        return;
+      }
+      this.importText = text;
+      this.toast('已粘贴');
+    }).catch((e: Error) => {
+      this.toast(`读取剪贴板失败：${e.message}`);
+    });
   }
 
   private async doImport(): Promise<void> {

@@ -809,14 +809,27 @@ export struct SettingsTab {
                 }
               })
               Divider().color(Theme.HAIRLINE).margin({ left: 16 })
-              FormRow({
-                label: '从剪贴板恢复',
-                value: '',
-                placeholder: '',
-                onTap: () => {
-                  this.restoreFromClipboard();
-                }
-              })
+              Row() {
+                Text('从剪贴板恢复')
+                  .fontSize(15)
+                  .fontColor(Theme.TEXT_1)
+                  .layoutWeight(1)
+                // 安全控件：点一下临时授权，之后才读得到剪贴板（不再申请 READ_PASTEBOARD）
+                PasteButton({ icon: PasteIconStyle.LINES, text: PasteDescription.PASTE, buttonType: ButtonType.Capsule })
+                  .fontSize(13)
+                  .constraintSize({ minWidth: 84, maxWidth: 108, minHeight: 34, maxHeight: 40 })
+                  .onClick((event: ClickEvent, result: PasteButtonOnClickResult) => {
+                    if (result === PasteButtonOnClickResult.SUCCESS) {
+                      this.restoreFromClipboard();
+                    } else {
+                      this.toast('没拿到剪贴板授权');
+                    }
+                  })
+              }
+              .width('100%')
+              .constraintSize({ minHeight: 52 })
+              .alignItems(VerticalAlign.Center)
+              .padding({ left: 16, right: 16, top: 8, bottom: 8 })
               Divider().color(Theme.HAIRLINE).margin({ left: 16 })
               FormRow({
                 label: '导出全部节点',

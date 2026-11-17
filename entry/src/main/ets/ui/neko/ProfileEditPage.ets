@@ -565,15 +565,17 @@ export struct ProfileEditPage {
       Scroll(this.scroller) {
         Column({ space: 10 }) {
           Row({ space: 10 }) {
-            GlowButton({
-              label: '粘贴链接解析',
-              grow: true,
-              buttonColor: Theme.SURFACE_2,
-              labelColor: Theme.TEXT_1,
-              onTap: () => {
-                this.pasteAndParse();
-              }
-            })
+            // 安全控件：点一下临时授权读剪贴板（不再申请 READ_PASTEBOARD）
+            PasteButton({ icon: PasteIconStyle.LINES, text: PasteDescription.PASTE, buttonType: ButtonType.Capsule })
+              .fontSize(14)
+              .constraintSize({ minWidth: 96, maxWidth: 132, minHeight: 40, maxHeight: 44 })
+              .onClick((event: ClickEvent, result: PasteButtonOnClickResult) => {
+                if (result === PasteButtonOnClickResult.SUCCESS) {
+                  this.pasteAndParse();
+                } else {
+                  this.toast('没拿到剪贴板授权');
+                }
+              })
             GlowButton({
               label: '保存',
               grow: true,

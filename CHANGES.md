@@ -1631,3 +1631,103 @@ Existing notification files reviewed:
 - 自检 75 → **79** 项全 PASS(新增:null flow 不当字符串、flow 白名单、xhttp 清空且留日志、出站永不含脏值)。
 - 版本 **0.5.63 / 500063**,HAP 15,514,637 字节,
   SHA256 `1BA22F699B99614286217F0385B760092C4D57EEB8545F6B740D157C8E2E7227`;只传 WebDAV(`ReedBox-unsigned.hap`)。
+
+## 2026-11-17 正式签名包：Release 签名的 `.app` + `.hap`(0.5.63)
+
+甲方给了签名材料(`RzdPai.p12` / `RzdPai.cer` / `ReedBoxRelease.p7b` / `RzdPai.csr` + 口令),要"构建正式 .app 签名包"。
+
+### 一、材料核对(签之前先验,别签出一个"看起来成功但证书不对"的包)
+
+| 项 | 结果 |
+| --- | --- |
+| profile 类型 | `type: release`、`app-distribution-type: app_gallery` ✅ |
+| profile 包名 | `com.rzdpai.nekobox`(与 `AppScope/app.json5` 一致)✅ |
+| profile 有效期 | 2026-11-17 ~ 2029-11-17 ✅ |
+| profile 里的发布证书 | `CN=陈景源(1719554603642578753), Release`,SHA256 `B3:AF:6D:E5:…:B4:5E` |
+| `RzdPai.cer` | 含完整链(root + DR CA + 上面的 Release 叶子)✅ |
+| `RzdPai.p12` 里的证书 | **自签** `CN=RzdPai`,SHA256 `16:83:96:A1:…:C6:24` ❌ 与 profile 不符 |
+| 公钥比对 | p12 证书 / `.cer` 叶子 / profile 证书 / CSR **公钥完全一致**(`ef9caa01…f4b3`)⇒ 私钥是对的,只是证书不对 |
+
+**这就是老工程踩过的坑(见 CHANGES 2.0.3 那节)**:直接拿 `RzdPai.p12` 签,签出来的包挂的是自签证书,
+AGC 会当作非发布证书。修法与老工程一致 —— 把发布证书链装进密钥库:
+
+```
+cp RzdPai.p12 RzdPai-release.p12
+keytool -importcert -alias huawei_cbg_root  -file root.pem         …   # 根
+keytool -importcert -alias huawei_drca      -file intermediate.pem …   # 中间 CA
+keytool -importcert -alias rzdpai           -file leaf.pem         …   # 叶子 → "Certificate reply was installed"
+```
+⚠️ 顺序必须 **根 → 中间 → 叶子**,否则 `Failed to establish chain from reply`。产物 `RzdPai-release.p12`(别名仍为 `rzdpai`)。
+
+### 二、出包
+
+1. `hvigorw assembleHap --mode module -p product=default -p buildMode=release` → unsigned HAP 14,221,412 B,
+   `module.json` 里 `debug:false / buildMode:release`(AppGallery 退审的坑,见 2.0.3 记录)。
+2. `hap-sign-tool sign-app -mode localSign -keyAlias rzdpai … -appCertFile RzdPai.cer -profileFile ReedBoxRelease.p7b
+   -signAlg SHA256withECDSA -keystoreFile RzdPai-release.p12 -compatibleVersion 60101024` → `dist/ReedBox-signed.hap`
+3. `hvigorw assembleApp --mode project -p product=default -p buildMode=release` → `build/outputs/default/RzdBox-default-unsigned.app`
+   (13,520,123 B,内含未签名 `entry-default.hap` + `pack.info` + `pac.json`)
+4. 解包 → 用第 2 步签好的 HAP **顶替** 内层 `entry-default.hap` → 按原结构重打包(不含顶层目录) → 用 `sign-app`
+   签外壳(**不带** `-compatibleVersion`)→ `dist/ReedBox-signed.app`
+
+### 三、验证
+
+- 两层 `verify-app` 均 `Verify success`;签名主体 = `Huawei CBG Root CA G2 → Huawei CBG Developer Relations CA G2 →
+  陈景源(1719554603642578753), Release`。
+- `.app` 内层 HAP 的 sha256 与外层交付的 `ReedBox-signed.hap` 一致(`5f4baffc…41f4`);
+  内层 `module.json` = `0.5.63 / 500063 / debug:false / com.rzdpai.nekobox`;`pack.info` 版本同为 `0.5.63(500063)`。
+
+### 四、产物
+
+| 文件 | 大小 | SHA256 |
+| --- | --- | --- |
+| `dist/ReedBox-signed.app` | 13,544,540 B | `63EAC3E4BFE346A69BF879FF4160C376CE2BDCF26A680E2E52B82FD8AE6395A3` |
+| `dist/ReedBox-signed.hap` | 14,275,892 B | `5F4BAFFC8FF155B992F8F1928CE12DAF74595C846D49446226BBD35035EA41F4` |
+
+两个都传了 WebDAV 根(`ReedBox-signed.app` / `ReedBox-signed.hap`),回读哈希一致。**没发任何 GitHub Release**
+(按 2026-11-17 定的规矩)。
+
+### 五、材料存放
+
+`RzdBox/.sign/`(已加进 `.gitignore`,**不入库**):原始 p12/cer/p7b/csr + 重建的 `RzdPai-release.p12` + 拆出来的
+三段证书 + `README.local`(口令与重建/出包命令)。口令只存在这个本地文件里,仓库里一个字都没有。
+
+## 2026-11-17 删掉受限权限 READ_PASTEBOARD，读剪贴板改走官方安全控件(0.5.64)
+
+甲方："`ohos.permission.READ_PASTEBOARD` 是受限权限…首页那个从剪贴板导入实际上也是手动输入，那么这个权限应该可以不使用吧。如果能删就删了。"
+
+### 一、确认口径（官方文档）
+
+- `ohos.permission.READ_PASTEBOARD` = **受限的 user_grant**：要在 AGC 申请 profile 里的 ACL、运行时还要弹窗授权。
+  我们之前只在 `module.json5` 里声明，没有 ACL ⇒ 发布包里 `getData()` 直接失败，helper 吞掉异常返回空串，
+  所以"从剪贴板导入"实际就是让用户自己粘 —— 与甲方观察一致。
+- 官方给了另一条路：**安全控件 `PasteButton`**（API 10+，手机/平板 12+）。用户点一下控件 → 系统临时授权 →
+  `getSystemPasteboard().getData()` 才成功；**不需要任何权限声明**，也不用弹窗。
+
+### 二、改动
+
+- `module.json5`：删掉 `READ_PASTEBOARD` 声明（含 reason/usedScene），并留注释说明为什么。
+  产物 `module.json` 现在只剩 `INTERNET / GET_NETWORK_INFO / KEEP_BACKGROUND_RUNNING / GET_BUNDLE_INFO / DETECT_GESTURE`。
+- 两套 `string.json`：删掉随之失效的 `permission_read_pasteboard_reason`。
+- 三处"读剪贴板"入口全部换成 `PasteButton`，并只在 `PasteButtonOnClickResult.SUCCESS` 之后才调 `getClipboardText()`：
+  1. 首页导入面板（原「读取剪贴板」按钮）；导入菜单里的「从剪贴板导入」改名 **「粘贴文本」**，点它只打开面板，
+     不再偷偷读剪贴板；
+  2. 节点编辑页（原「粘贴链接解析」按钮）；
+  3. 设置 → 从剪贴板恢复（原 `FormRow` 换成"标题 + 粘贴控件"的一行）。
+- 安全控件不支持通用属性/通用事件，所以样式只用 `fontSize` + `constraintSize`（字号/尺寸别设太小，否则授权会失败）。
+- `utils/ClipboardHelper.ets`：`getClipboardText()` 保留，但注释写明"**只能在 PasteButton 授权之后调用**"；
+  写剪贴板（复制分享链接/备份）不需要权限，照旧。
+- 自检新增 1 条：`module.json5` 不得再出现该权限；三处 `getClipboardText()` 调用点必须都有 `SUCCESS` 判断护栏。总数 79 → **80**。
+
+### 三、重新出包（上架要用删了权限的这版）
+
+- 版本 0.5.63 → **0.5.64 / 500064**；`assembleHap(buildMode=release)` → 签名 HAP → `assembleApp(project, release)` →
+  解包用已签 HAP 顶替内层 → 重打包 → 签外壳，两层 `verify-app` 均通过。
+
+| 文件 | 大小 | SHA256 |
+| --- | --- | --- |
+| `dist/ReedBox-signed.app` | 13,544,586 B | `5EBF0675FBCA5E283FFC09E2359CDC4F5AB488C163D672F515EFCA17373B88A7` |
+| `dist/ReedBox-signed.hap` | 14,276,707 B | `ACA4F9231DDFEF9B3B3255E5814EF354384C362BA5EBC304FDB139C03151C780` |
+| `dist/ReedBox-unsigned.hap`(debug，侧载) | 15,512,597 B | `CED285F43DA7681CD7B861B058C76531AC33448164E10682C3D6324A3DDA5571` |
+
+三个都传到 WebDAV 根（覆盖同名），回读哈希一致；**没有发 GitHub Release**。

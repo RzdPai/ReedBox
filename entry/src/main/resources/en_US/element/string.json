@@ -5,10 +5,6 @@
       "value": "ReedBox"
     },
     {
-      "name": "permission_read_pasteboard_reason",
-      "value": "Used to read and import subscription links or profile configurations from the clipboard"
-    },
-    {
       "name": "brand_name",
       "value": "REEDBOX"
     },

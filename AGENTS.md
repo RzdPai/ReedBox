@@ -11,7 +11,7 @@ c-shared `.so`，进程内 `dlopen`，TUN fd 由 `VpnExtensionAbility` 直接交
 
 - 显示名 **ReedBox**、仓库 **https://github.com/RzdPai/ReedBox**（2026-11-16 改名/开源）；目录仍叫 `RzdBox/`
 - bundleName **`com.rzdpai.nekobox`**（**没跟着改名**：改它等于装一个新应用，老数据不迁；见项目记忆第六十三轮 A）
-- versionName **0.5.63** / versionCode **500063**（以 `AppScope/app.json5` 为准）
+- versionName **0.5.64** / versionCode **500064**（以 `AppScope/app.json5` 为准）
 - compatible/target **6.1.1(24)**，deviceTypes phone/tablet
 - 状态管理**全 V2**、路由**只走 Navigation**、UI 组件优先 HDS —— 这三条是硬规则，别回退。
 
@@ -53,6 +53,9 @@ cd /root/Project/RzdBox
   发版（release + 资产上传）只在甲方明确要求时做。
 - 甲方口中的"日志"包含给用户看的提示/toast —— 想加先问。
 - 报告里写清"改了什么、为什么、验证到哪一步"，别把诊断性改动混进正式包。
+- **正式签名包**：材料在 `.sign/`（已 gitignore，永不入库，含口令文件 `README.local`）；
+  注意原始 `RzdPai.p12` 里装的是**自签**证书，必须用 `.sign/RzdPai-release.p12`（已换发布证书链）签，
+  否则 verify-app 也过但 AGC 会当非发布证书。流程见 `CHANGES.md` 2026-11-17 签名那一节。
 
 ## 排查
 
