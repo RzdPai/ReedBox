@@ -40,6 +40,7 @@ import { VpnRuntime } from './VpnRuntime';
 import { Accent } from '../ui/Accent';
 import { Handedness } from './Handedness';
 import { KeepAlive } from './KeepAlive';
+import { publishVpnLatency } from './VpnIpc';
 
 const DOMAIN: number = 0x4e4b;
 const TAG: string = 'NekoBox-State';
@@ -678,6 +679,10 @@ export class AppState {
       if (p.id === id) {
         p.latencyMs = ms;
         p.latencyTestedAt = Date.now();
+        // 正在连着的那个节点：把新延迟同步给 VPN 通知（以前这套通道定义了却没人调，通知里永远是 "--"）
+        if (id === this.runningProfileId && ms >= 0) {
+          publishVpnLatency(id, p.name, ms);
+        }
       }
     }
     this.pendingLatency.set(id, ms);

@@ -195,6 +195,7 @@ async function main() {
     './VpnRuntime': runtimeModule,
     '../utils/LinkParser': {}, '../utils/Subscription': {}, '../utils/LatencyTester': {}, '../utils/GeoAssets': {},
     '../ui/Accent': accentModule,
+    './VpnIpc': { publishVpnLatency() {} },
     './KeepAlive': { KeepAlive: { async ensureStarted() {}, async ensureStopped() {} } },
     './Handedness': { Handedness: { get() { return { side: 'right', start() {}, setEnabled() {} }; } } }
   });
@@ -305,6 +306,7 @@ async function main() {
     '../utils/LatencyTester': { async testProfiles() { return []; }, async urlTestProfiles() { return []; } },
     '../utils/GeoAssets': { async downloadGeoAsset() { return ''; } },
     '../ui/Accent': accentModule,
+    './VpnIpc': { publishVpnLatency() {} },
     './KeepAlive': { KeepAlive: { async ensureStarted() {}, async ensureStopped() {} } },
     './Handedness': { Handedness: { get() { return { side: 'right', start() {}, setEnabled() {} }; } } }
   });
@@ -695,9 +697,11 @@ async function main() {
     assert.match(home2, /private tabsController: TabsController = new TabsController\(\);/);
     // 只给 controller（带 index 会吃掉切页动画）；首帧对齐靠延后一帧的一次性 realign
     assert.match(home2, /Tabs\(\{ barPosition: BarPosition\.Start, controller: this\.tabsController \}\)/);
-    assert.match(home2, /private realignTabsToSelectedGroup\(\): void \{/);
-    assert.match(home2, /this\.realignTimer = setTimeout\(\(\): void => \{/);
-    assert.match(home2, /this\.realignTimer = -1;/);
+    // 启动阶段对齐页签：必须是"多档重试"而不是一次性 setTimeout（子节点在后续帧才建好）
+    assert.match(home2, /private forceTabsToSelected\(\): void \{/);
+    assert.match(home2, /const REALIGN_DELAYS: Array<number> = \[0, 120, 400, 1000\];/);
+    assert.match(home2, /this\.scheduleTabsRealign\(\);/);
+    assert.match(home2, /this\.realignTimers\.push\(setTimeout\(\(\): void => \{/);
     assert.match(home2, /\.animationDuration\(\d+\)/);
     assert.match(home2, /this\.tabsController\.changeIndex\(index\);/);
     // 系统回调不能把页签写回真源（首帧会先落到 0，写了就把恢复的分组覆盖掉）
@@ -961,6 +965,7 @@ async function main() {
     '../utils/LatencyTester': stubLatency,
     '../utils/GeoAssets': { async downloadGeoAsset() { return ''; } },
     '../ui/Accent': accentModule,
+    './VpnIpc': { publishVpnLatency() {} },
     './KeepAlive': { KeepAlive: { async ensureStarted() {}, async ensureStopped() {} } },
     './Handedness': { Handedness: { get() { return { side: 'right', start() {}, setEnabled() {} }; } } }
   });
@@ -1047,6 +1052,7 @@ async function main() {
     '../utils/LatencyTester': stubLatency,
     '../utils/GeoAssets': { async downloadGeoAsset() { return ''; } },
     '../ui/Accent': accentModule,
+    './VpnIpc': { publishVpnLatency() {} },
     './KeepAlive': { KeepAlive: { async ensureStarted() {}, async ensureStopped() {} } },
     './Handedness': { Handedness: { get() { return { side: 'right', start() {}, setEnabled() {} }; } } }
   });

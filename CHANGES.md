@@ -1842,3 +1842,37 @@ permissions       = INTERNET / GET_NETWORK_INFO / KEEP_BACKGROUND_RUNNING / GET_
 
 1. 连接后首页/通知栏速率是否走动（不走动就抓 `[vpn] 读取 vpn-tun 网卡计数失败` 那行）；
 2. 后台挂 10 分钟以上不断线；若仍被砍，下一步做"长时任务通知 live view 进度条"。
+
+## 2026-11-20 通知看不到速率 + 页签与实际内容不一致（0.5.67）
+
+甲方两张截图两条：① **通知卡片上没有速度**（应用内已经能看到了）；② **上次选在 A 分组，重启后上方页签显示 A、底下内容却是第 1 个分组**。
+
+### 一、通知没有速率：速率写在了 `additionalText`，折叠态不显示
+
+- 原来：`title=VPN 已连接`、`text=节点名 · 延迟`、`additionalText=速率 + 累计流量`。
+  截图是"更多通知"里的**折叠态**，只渲染标题 + 正文 ⇒ 速率那一行被吃掉，只剩 `America1 · --`。
+- 修法：**速率放进正文那一行**：`text = [分组] 节点名 · 上传 x/s / 下载 y/s`；
+  `additionalText = 累计 上传… / 下载… · 延迟`（展开时才看）。
+- 顺带把一直显示 `--` 的延迟接上了：`AppState.commitLatency()` 里，被测节点正好是**当前运行节点**时
+  调 `publishVpnLatency(id, name, ms)`（这套通道早就定义了但从没被调用过），扩展收到后重发通知。
+
+### 二、页签显示 A、内容是第 1 组：启动阶段 `changeIndex` 越界被忽略后没人再纠偏
+
+- 我的 `@Local groupIndex` 画的页签条是对的（所以上面显示 A），但**下面显示哪一页由 Tabs 的内部 index 决定**；
+  分组列表从 0 变成 n 的那一帧，TabContent 子节点还没建好，此时 `changeIndex(A)` 越界被忽略，Tabs 停在 0。
+- 之前只在 `setTimeout(0)` 里纠一次 —— 它可能比下一帧布局更早，照样落空（0.5.58 那个"延后一帧"没兜住）。
+- 现在：`REALIGN_DELAYS = [0, 120, 400, 1000]` 多档重试，每次都调 `changeIndex(target)`（幂等）；
+  **不再看 `tabsIndex`**（越界那次它已经被写成目标值了，用它判断会永远跳过纠偏）；
+  用户手动点页签时 `cancelTabsRealign()`，不会被"拽回去"。
+
+### 三、交付
+
+版本 **0.5.67 / 500067**（Release SDK 26.0.0.105：`apiReleaseType: Release`、`debug:false`），两层 `verify-app` 通过，自检 80/80。
+
+| 文件 | 大小 | SHA256 |
+| --- | --- | --- |
+| `dist/ReedBox-signed.app` | 13,546,637 B | `30884DB93F254DD8C48FDE42377B4DC13D2284CBBCF16A6035E5CC372BEEF7AF6` |
+| `dist/ReedBox-signed.hap` | 14,280,059 B | `1058EB97E0039E512E9A77D9622ACE506FEEC1056D67582FFFD7733C7C185C07` |
+| `dist/ReedBox-unsigned.hap`(debug) | 15,524,225 B | `DD9D27EB1F6B0C4D43EA9EE0B33B691BDA2DCBD52DADC45B94EBCC2C8903A932` |
+
+三个都传了 WebDAV（回读哈希一致），未发 GitHub Release。

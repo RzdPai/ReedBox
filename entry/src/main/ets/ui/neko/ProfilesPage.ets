@@ -47,6 +47,9 @@ const R_MOVE: number = 3;
 const R_COPY: number = 4;
 const R_DELETE: number = 5;
 
+/** 启动阶段对齐分组页签的重试时刻（毫秒）：TabContent 子节点是在后续帧里才建好的 */
+const REALIGN_DELAYS: Array<number> = [0, 120, 400, 1000];
+
 /** One immutable value supplies every runtime label, tint and control state in the bottom bar. */
 class ProfilesRuntimeView {
   running: boolean = false;
@@ -238,17 +241,13 @@ export struct ProfilesPage {
     this.tabsGroupCount = this.app.groups.length;
     if (groupsChanged) {
       /**
-       * TabContent 的数量刚变（0 → n）时**本帧子节点还没建好**，此刻 changeIndex 越界会被忽略
-       * ⇒ Tabs 自己停在 index 0，表现就是"重进软件/刚加载完回到第 1 个分组"。
-       * 延后一帧再对齐（一次性，不是轮询）。
+       * TabContent 的数量刚变（0 → n）时子节点还没建好，此刻 changeIndex 越界会被忽略
+       * ⇒ Tabs 自己停在 index 0：上方页签条高亮的是 A 分组（那是我自己的 groupIndex 画的），
+       *   底下内容却是第 1 个分组（那由 Tabs 的内部 index 决定）。
+       * 之前只在 `setTimeout(0)` 里对齐一次 —— 它可能比下一帧布局还早，照样落空。
+       * 现在按 0/120/400/1000ms 多试几次（幂等；用户一点页签就取消）。
        */
-      if (this.realignTimer >= 0) {
-        clearTimeout(this.realignTimer);
-      }
-      this.realignTimer = setTimeout((): void => {
-        this.realignTimer = -1;
-        this.realignTabsToSelectedGroup();
-      }, 0);
+      this.scheduleTabsRealign();
     } else if (this.tabsIndex !== this.groupIndex) {
       this.tabsController.changeIndex(this.groupIndex);
       this.tabsIndex = this.groupIndex;
@@ -290,15 +289,34 @@ export struct ProfilesPage {
    * 把系统 Tabs 对齐到真源那一页（分组增删后 TabContent 子节点重建，必须等布局完成再 changeIndex）。
    * 只在"分组数量刚变"时由一次性定时器调用，不参与轮询。
    */
-  private realignTabsToSelectedGroup(): void {
-    const targetIndex: number = this.indexForGroup(this.app.selectedGroupId);
-    if (targetIndex >= 0) {
-      this.groupIndex = targetIndex;
+  private scheduleTabsRealign(): void {
+    this.cancelTabsRealign();
+    for (const delay of REALIGN_DELAYS) {
+      this.realignTimers.push(setTimeout((): void => {
+        this.forceTabsToSelected();
+      }, delay));
     }
-    if (this.tabsIndex !== this.groupIndex) {
-      this.tabsController.changeIndex(this.groupIndex);
-      this.tabsIndex = this.groupIndex;
+  }
+
+  private cancelTabsRealign(): void {
+    for (const timer of this.realignTimers) {
+      clearTimeout(timer);
     }
+    this.realignTimers = [];
+  }
+
+  /**
+   * 把 Tabs 强行掰到真源那一页。
+   * ⚠️ 这里**不看** `tabsIndex`：越界那次 changeIndex 被忽略时它已经被写成目标值了，
+   *   再拿它判断就会永远跳过纠偏（这正是"页签显示 A、内容是第 1 组"的原因）。
+   */
+  private forceTabsToSelected(): void {
+    const target: number = this.indexForGroup(this.app.selectedGroupId);
+    if (target < 0) {
+      return;
+    }
+    this.groupIndex = target;
+    this.tabsController.changeIndex(target);
     this.syncVisibleRows();
   }
 
@@ -417,6 +435,8 @@ export struct ProfilesPage {
     }
     hilog.info(DOMAIN, TAG, '[profiles-tab] select index=%{public}d group=%{public}s nodes=%{public}d',
       index, group.id, this.app.groupNodeCount(group.id));
+    // 用户自己点了页签：别再让启动时排的重试把他拽回去
+    this.cancelTabsRealign();
     this.groupIndex = index;
     this.app.selectGroupById(group.id);
     this.tabsController.changeIndex(index);
@@ -434,8 +454,8 @@ export struct ProfilesPage {
   private tabsIndex: number = 0;
   /** 上一次同步时看到的分组数（判断 TabContent 子节点是否刚重建过） */
   private tabsGroupCount: number = 0;
-  /** 延后一帧对齐页签用的定时器（页面销毁时要清掉，别对已卸载的 Tabs 调 changeIndex） */
-  private realignTimer: number = -1;
+  /** 启动阶段把 Tabs 对齐到真源用的定时器（页面销毁/用户手动切页时清掉） */
+  private realignTimers: Array<number> = [];
   private pageScrollers: Map<string, Scroller> = new Map<string, Scroller>();
 
   private scrollerFor(key: string): Scroller {
@@ -1243,10 +1263,7 @@ export struct ProfilesPage {
     this.app.unsubscribe(this.onBusinessChanged);
     this.runtime.unsubscribe(this.onRuntimeChanged);
     this.stateSubscribed = false;
-    if (this.realignTimer >= 0) {
-      clearTimeout(this.realignTimer);
-      this.realignTimer = -1;
-    }
+    this.cancelTabsRealign();
   }
 
   private onBusinessChanged = (): void => {

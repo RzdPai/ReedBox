@@ -815,16 +815,21 @@ export default class VpnExtAbility extends VpnExtensionAbility {
       const uploadLabel = res.getStringSync($r('app.string.notification_upload'));
       const downloadLabel = res.getStringSync($r('app.string.notification_download'));
       const totalLabel = res.getStringSync($r('app.string.notification_total'));
-      const trafficText = `${uploadLabel} ${this.formatNotificationSpeed(this.notificationUpSpeed)} / ` +
-        `${downloadLabel} ${this.formatNotificationSpeed(this.notificationDownSpeed)} · ` +
-        `${totalLabel} ${uploadLabel} ${this.formatNotificationBytes(this.notificationTotalUp)} / ` +
-        `${downloadLabel} ${this.formatNotificationBytes(this.notificationTotalDown)}`;
+      /**
+       * ★ 实时速率必须写在**正文**（text）里：通知在"更多通知"里折叠时只显示标题 + 正文，
+       *   additionalText 那一行会被吃掉（甲方 2026-11-20 截图："America1 · --"，看不到速度）。
+       *   累计流量 + 延迟放 additionalText，展开时才看得到。
+       */
+      const speedText: string = `${displayName} · ${uploadLabel} ${this.formatNotificationSpeed(this.notificationUpSpeed)}`
+        + ` / ${downloadLabel} ${this.formatNotificationSpeed(this.notificationDownSpeed)}`;
+      const totalsText: string = `${totalLabel} ${uploadLabel} ${this.formatNotificationBytes(this.notificationTotalUp)}`
+        + ` / ${downloadLabel} ${this.formatNotificationBytes(this.notificationTotalDown)} · ${latencyText}`;
       const content: notificationManager.NotificationContent = {
         contentType: notification.ContentType.NOTIFICATION_CONTENT_BASIC_TEXT,
         normal: {
           title: res.getStringSync($r('app.string.notification_vpn_connected')),
-          text: `${displayName} · ${latencyText}`,
-          additionalText: trafficText
+          text: speedText,
+          additionalText: totalsText
         }
       };
       const request: notificationManager.NotificationRequest = {
