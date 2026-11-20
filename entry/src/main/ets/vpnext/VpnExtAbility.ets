@@ -16,7 +16,8 @@ import { loadRouteRules, RouteRule, loadRemoteRuleSets, RemoteRuleSet } from '..
 import { CoreManager } from '../core/CoreManager';
 import { publishVpnLog, publishVpnStatus, publishVpnTraffic, VPN_EVENT_LATENCY, VPN_EVENT_APP_FOREGROUND } from '../core/VpnIpc';
 import { geoReady, geoSitePath as geoSiteFile, geoIpPath as geoIpFile } from '../utils/GeoAssets';
-import { fetchTrafficTotals } from '../utils/TrafficStats';
+import { fetchTrafficTotals, TrafficTotals } from '../utils/TrafficStats';
+import statistics from '@ohos.net.statistics';
 
 /**
  * VPN 扩展能力 — 真正的 VPN 生命周期在这里:
@@ -73,6 +74,8 @@ export default class VpnExtAbility extends VpnExtensionAbility {
   private notificationGroupName: string = '';
   /** 连续通知发布失败计数:通知被关闭时不再按 speedInterval(1s) 无界重试刷日志。 */
   private notificationFailStreak: number = 0;
+  /** TUN 计数读取失败只记一次日志 */
+  private tunCounterWarned: boolean = false;
   /** 本次会话流量落库的 promise（断开流程要等它写完再发 disconnected，见 awaitTrafficPersist） */
   private pendingTrafficPersist: Promise<void> | null = null;
   // 网络变化重置连接(功能对齐安卓 networkChangeResetConnections,2.0.2 起默认关)
@@ -610,10 +613,35 @@ export default class VpnExtAbility extends VpnExtensionAbility {
     await clearPendingProfileId();
   }
 
+  /**
+   * 读取 TUN 网卡自创建以来的累计字节（不需要任何权限）。
+   * ★ 为什么需要它：Clash API 默认关掉之后，原来唯一的流量来源（clash API /connections）就没了，
+   *   界面上的实时速率永远是 0、节点卡也永远不涨流量。TUN 是内核与应用之间唯一的通路，
+   *   它的收发计数就是隧道的上下行。
+   *   方向：packets 由内核写进 TUN → 应用收到 ⇒ 网卡的 rx = 下行；应用发出 → TUN ⇒ tx = 上行。
+   */
+  private async fetchTunTotals(): Promise<TrafficTotals | null> {
+    try {
+      const rx: number = await statistics.getIfaceRxBytes(VPN_TUN_IFNAME);
+      const tx: number = await statistics.getIfaceTxBytes(VPN_TUN_IFNAME);
+      if (!Number.isFinite(rx) || !Number.isFinite(tx)) {
+        return null;
+      }
+      const totals: TrafficTotals = { up: tx, down: rx };
+      return totals;
+    } catch (e) {
+      if (!this.tunCounterWarned) {
+        this.tunCounterWarned = true;
+        LogStore.addLog(`[vpn] 读取 ${VPN_TUN_IFNAME} 网卡计数失败,速率将不可用: ${e}`);
+      }
+      return null;
+    }
+  }
+
   private startNotificationTrafficPoller(): void {
     this.stopNotificationTrafficPoller();
     const settings = this.notificationSettings;
-    if (!this.started || settings === null || !settings.clashApiEnabled) {
+    if (!this.started) {
       return;
     }
     this.notificationLastUp = 0;
@@ -627,7 +655,14 @@ export default class VpnExtAbility extends VpnExtensionAbility {
     const generation = ++this.notificationGeneration;
     const poll = async (): Promise<void> => {
       const startedAt = Date.now();
-      const totals = await fetchTrafficTotals(settings.clashApiPort, settings.clashApiSecret);
+      // 优先 Clash API（能按节点统计）；它关着或取不到就退回 TUN 网卡计数（不需要任何权限）
+      let totals: TrafficTotals | null = null;
+      if (settings !== null && settings.clashApiEnabled) {
+        totals = await fetchTrafficTotals(settings.clashApiPort, settings.clashApiSecret);
+      }
+      if (totals === null) {
+        totals = await this.fetchTunTotals();
+      }
       if (generation !== this.notificationGeneration || !this.started || totals === null) {
         return;
       }
@@ -650,7 +685,7 @@ export default class VpnExtAbility extends VpnExtensionAbility {
     };
     void poll();
     // 通知刷新间隔(对齐安卓 speedInterval,默认 1000ms,允许 500ms~10s)
-    const rawMs = settings.speedIntervalMs;
+    const rawMs = settings === null ? 1000 : settings.speedIntervalMs;
     const intervalMs = rawMs >= 500 && rawMs <= 10000 ? rawMs : 1000;
     this.notificationTrafficTimer = setInterval(() => { void poll(); }, intervalMs);
   }

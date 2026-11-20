@@ -18,6 +18,7 @@ import { markSubFailure, markSubSuccess, needAutoUpdate, updateSubscription } fr
 import { subErrorText } from '../utils/Subscription';
 import { AppState } from '../core/AppState';
 import { AppSettings } from '../model/Profile';
+import { KeepAlive } from '../core/KeepAlive';
 import { VpnRuntime } from '../core/VpnRuntime';
 
 /**
@@ -119,18 +120,27 @@ export default class EntryAbility extends UIAbility {
       if (due.length === 0) {
         return;
       }
-      const agent = await wantAgent.getWantAgent({
-        wants: [{
-          bundleName: this.context.abilityInfo.bundleName,
-          abilityName: 'EntryAbility'
-        }],
-        actionType: wantAgent.OperationType.START_ABILITY,
-        requestCode: 1003,
-        actionFlags: [wantAgent.WantAgentFlags.UPDATE_PRESENT_FLAG]
-      });
-      await backgroundTaskManager.startBackgroundRunning(this.context,
-        backgroundTaskManager.BackgroundMode.DATA_TRANSFER, agent);
-      backgroundRunning = true;
+      /**
+       * ★ 一个 UIAbility 同时只能挂一个长时任务（9800005）。VPN 连着时 KeepAlive 已经挂了一个，
+       *   这里再挂会失败、而且 finally 里的 stop 会把 VPN 那个拆掉 ⇒ 保活白做。
+       *   所以只有"当前没有任务"时才临时挂，结束时也只拆自己挂的那个。
+       */
+      if (KeepAlive.isActive()) {
+        LogStore.addLog('[app] 已有长时任务（VPN 保活），更新订阅直接复用');
+      } else {
+        const agent = await wantAgent.getWantAgent({
+          wants: [{
+            bundleName: this.context.abilityInfo.bundleName,
+            abilityName: 'EntryAbility'
+          }],
+          actionType: wantAgent.OperationType.START_ABILITY,
+          requestCode: 1003,
+          actionFlags: [wantAgent.WantAgentFlags.UPDATE_PRESENT_FLAG]
+        });
+        await backgroundTaskManager.startBackgroundRunning(this.context,
+          backgroundTaskManager.BackgroundMode.DATA_TRANSFER, agent);
+        backgroundRunning = true;
+      }
       for (const sub of due) {
         try {
           const result = await updateSubscription(sub.url);

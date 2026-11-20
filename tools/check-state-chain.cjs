@@ -195,6 +195,7 @@ async function main() {
     './VpnRuntime': runtimeModule,
     '../utils/LinkParser': {}, '../utils/Subscription': {}, '../utils/LatencyTester': {}, '../utils/GeoAssets': {},
     '../ui/Accent': accentModule,
+    './KeepAlive': { KeepAlive: { async ensureStarted() {}, async ensureStopped() {} } },
     './Handedness': { Handedness: { get() { return { side: 'right', start() {}, setEnabled() {} }; } } }
   });
   const app = appModule.AppState.get();
@@ -304,6 +305,7 @@ async function main() {
     '../utils/LatencyTester': { async testProfiles() { return []; }, async urlTestProfiles() { return []; } },
     '../utils/GeoAssets': { async downloadGeoAsset() { return ''; } },
     '../ui/Accent': accentModule,
+    './KeepAlive': { KeepAlive: { async ensureStarted() {}, async ensureStopped() {} } },
     './Handedness': { Handedness: { get() { return { side: 'right', start() {}, setEnabled() {} }; } } }
   });
   const appModule2 = load('core/AppState.ets', appDeps(store2));
@@ -959,6 +961,7 @@ async function main() {
     '../utils/LatencyTester': stubLatency,
     '../utils/GeoAssets': { async downloadGeoAsset() { return ''; } },
     '../ui/Accent': accentModule,
+    './KeepAlive': { KeepAlive: { async ensureStarted() {}, async ensureStopped() {} } },
     './Handedness': { Handedness: { get() { return { side: 'right', start() {}, setEnabled() {} }; } } }
   });
   const app4 = appModule4.AppState.get();
@@ -1044,6 +1047,7 @@ async function main() {
     '../utils/LatencyTester': stubLatency,
     '../utils/GeoAssets': { async downloadGeoAsset() { return ''; } },
     '../ui/Accent': accentModule,
+    './KeepAlive': { KeepAlive: { async ensureStarted() {}, async ensureStopped() {} } },
     './Handedness': { Handedness: { get() { return { side: 'right', start() {}, setEnabled() {} }; } } }
   });
   const app5 = appModule5.AppState.get();

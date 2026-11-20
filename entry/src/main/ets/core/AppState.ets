@@ -39,6 +39,7 @@ import { downloadGeoAsset } from '../utils/GeoAssets';
 import { VpnRuntime } from './VpnRuntime';
 import { Accent } from '../ui/Accent';
 import { Handedness } from './Handedness';
+import { KeepAlive } from './KeepAlive';
 
 const DOMAIN: number = 0x4e4b;
 const TAG: string = 'NekoBox-State';
@@ -95,6 +96,12 @@ export class AppState {
     this.totalDown = this.runtime.totalDown;
     this.connectedAt = this.runtime.connectedAt;
     this.mirroredRunning = this.vpnRunning;
+    // 后台保活：连着的时候给 UI 进程挂一个"数据传递"长时任务（进程被回收 = 系统会停掉 VPN）
+    if (this.vpnRunning) {
+      KeepAlive.ensureStarted(this.context);
+    } else {
+      KeepAlive.ensureStopped(this.context);
+    }
     if (wasRunning && !this.vpnRunning && this.ready) {
       // 断开时扩展进程会把本次会话流量累加进节点记录（profileTrafficStatistics）：
       // 重新读一次，节点卡上的 ↑tx ↓rx 才是最新值，而不是上次启动时的旧数。

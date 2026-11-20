@@ -1787,3 +1787,58 @@ permissions       = INTERNET / GET_NETWORK_INFO / KEEP_BACKGROUND_RUNNING / GET_
 | `dist/ReedBox-unsigned.hap`(debug) | 15,512,600 B | `EB5E2E13AC50960412225783466F2A246294A9D3A63F2BF0299AC288995FF579` |
 
 没发 GitHub Release。
+
+## 2026-11-20 连接时速率恒为 0 + 后台保活差（0.5.66）
+
+甲方两条：① **连接时速度一直为 0**；② **后台保活很差**，建议照别的应用做"模拟下载"保活。
+
+### 一、速率恒为 0 的根因：6.3 那轮把 Clash API 默认关掉，速率的数据源跟着没了
+
+扩展进程的流量轮询原来是**唯一**的速率来源，而且入口就要求 `settings.clashApiEnabled`；
+关掉之后 `startNotificationTrafficPoller()` 直接 return ⇒ 不发布流量事件 ⇒ UI 的 `upSpeed/downSpeed`
+永远是 0，节点卡的历史流量也不再累加。
+
+**修法：加一条不需要任何权限的备用数据源 —— TUN 网卡自身的收发计数。**
+
+- `@ohos.net.statistics.getIfaceRxBytes('vpn-tun')` / `getIfaceTxBytes('vpn-tun')`（**无 @permission**，API 10+）；
+- TUN 是内核与应用之间唯一通路：网卡 rx = 下行、tx = 上行，天然就是隧道流量；
+- 轮询里**优先 Clash API**（能按节点统计），关着或取不到时退回 TUN 计数；
+  两条路都失败才不发布（并只记一次日志，不刷屏）。
+- 顺带修了同一处的两处空值隐患：`settings` 为 null 时 `speedIntervalMs` 的读取、以及 `started` 判断。
+
+### 二、后台保活：给 UI 进程挂"数据传递"长时任务（甲方说的模拟下载）
+
+官方文档明确：**调用 `startVpnExtensionAbility` 的应用进程退出时，系统会停止 VPN**。
+之前没挂长时任务，切后台一段时间 UI 进程被回收 ⇒ 隧道跟着断。
+
+- 新增 `core/KeepAlive.ets`：VPN 连上 → `startBackgroundRunning(ctx, ['dataTransfer'], wantAgent)`；
+  断开 → `stopBackgroundRunning()`；每 **5 分钟** `updateBackgroundRunning()` 续一次
+  （DATA_TRANSFER 有"10 分钟不更新进度就取消任务"的规则，留一倍余量）。
+- 为什么不是别的类型：`TASK_KEEPING`（算力任务）在非 PC 设备从 API 21 起要 ACL
+  `KEEP_BACKGROUND_RUNNING_SYSTEM`，普通应用用不了；`AUDIO_PLAYBACK` 要真的接 AVSession、`LOCATION` 要定位。
+  `DATA_TRANSFER` 只要已有的 `KEEP_BACKGROUND_RUNNING` + `backgroundModes: ["dataTransfer"]`。
+- ⚠️ **不能用 `updateDataTransferProgress`**（真正的进度上报）：那是 **26.0.1** 才有的 API，
+  上架用的 Release SDK 26.0.0.105 里根本没有，引了直接编译不过（也不该为它背 beta 依赖）。
+- 冲突修复：`updateDueSubscriptionsInBackground()` 原本无条件 `startBackgroundRunning` + finally `stop`，
+  而"一个 UIAbility 同时只能挂一个长时任务"（9800005）⇒ 它会把 VPN 的保活任务**抢掉/拆掉**。
+  现在只在 `KeepAlive.isActive()` 为假时才自己挂，结束时也只拆自己挂的。
+
+### 三、验证
+
+- `node tools/check-state-chain.cjs` 80/80 PASS（AppState 新增 KeepAlive 依赖，自检脚本补了桩）。
+- Release SDK 构建 `BUILD SUCCESSFUL`；`ets/modules.abc` 里可见 `KeepAlive/keepalive/getIfaceRxBytes/vpn-tun`。
+- 版本 **0.5.66 / 500066**，`apiReleaseType: Release` / `compileSdkVersion 26.0.0.105` / `debug:false`（可直接上架）。
+- 两层 `verify-app` 通过。
+
+| 文件 | 大小 | SHA256 |
+| --- | --- | --- |
+| `dist/ReedBox-signed.app` | 13,546,476 B | `BA533A6AB9BDC7F6BAC87AFA7BE3736CC6C291FA81FE983EEDAD136ECA50611E` |
+| `dist/ReedBox-signed.hap` | 14,280,572 B | `3EB79AF059E8A353442F8A3B83ED11C55FBB0BEC15A06BB5FE0333CB035B7876` |
+| `dist/ReedBox-unsigned.hap`(debug) | 15,522,950 B | `1AEA18E9F645550683AF52BFCEF3D1D491D6EDF6660C81E9F771A4E588FB70D3` |
+
+三个都传了 WebDAV（回读哈希一致），未发 GitHub Release。
+
+### 四、真机待验
+
+1. 连接后首页/通知栏速率是否走动（不走动就抓 `[vpn] 读取 vpn-tun 网卡计数失败` 那行）；
+2. 后台挂 10 分钟以上不断线；若仍被砍，下一步做"长时任务通知 live view 进度条"。
