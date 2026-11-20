@@ -47,8 +47,6 @@ const R_MOVE: number = 3;
 const R_COPY: number = 4;
 const R_DELETE: number = 5;
 
-/** 启动阶段对齐分组页签的重试时刻（毫秒）：TabContent 子节点是在后续帧里才建好的 */
-const REALIGN_DELAYS: Array<number> = [0, 120, 400, 1000];
 
 /** One immutable value supplies every runtime label, tint and control state in the bottom bar. */
 class ProfilesRuntimeView {
@@ -235,23 +233,9 @@ export struct ProfilesPage {
     this.groupCount = this.app.groups.length;
     this.groupItems = this.groupLabels();
     this.consumePendingGroup();
+    // ★ 内容页由 Swiper 的 `index` 直接绑 groupIndex 决定（见 build()）：这里只要把下标算对，
+    //   页签条与列表内容就永远是同一页，不需要任何"延后对齐/重试"。
     this.alignGroupIndex();
-    // 分组被删/新增后把系统 Tabs 对齐到当前页（不绑 index，靠控制器切，才保住系统切换动画）
-    const groupsChanged: boolean = this.tabsGroupCount !== this.app.groups.length;
-    this.tabsGroupCount = this.app.groups.length;
-    if (groupsChanged) {
-      /**
-       * TabContent 的数量刚变（0 → n）时子节点还没建好，此刻 changeIndex 越界会被忽略
-       * ⇒ Tabs 自己停在 index 0：上方页签条高亮的是 A 分组（那是我自己的 groupIndex 画的），
-       *   底下内容却是第 1 个分组（那由 Tabs 的内部 index 决定）。
-       * 之前只在 `setTimeout(0)` 里对齐一次 —— 它可能比下一帧布局还早，照样落空。
-       * 现在按 0/120/400/1000ms 多试几次（幂等；用户一点页签就取消）。
-       */
-      this.scheduleTabsRealign();
-    } else if (this.tabsIndex !== this.groupIndex) {
-      this.tabsController.changeIndex(this.groupIndex);
-      this.tabsIndex = this.groupIndex;
-    }
     this.syncRuntimeView();
     this.syncVisibleRows();
   }
@@ -285,40 +269,6 @@ export struct ProfilesPage {
     return -1;
   }
 
-  /**
-   * 把系统 Tabs 对齐到真源那一页（分组增删后 TabContent 子节点重建，必须等布局完成再 changeIndex）。
-   * 只在"分组数量刚变"时由一次性定时器调用，不参与轮询。
-   */
-  private scheduleTabsRealign(): void {
-    this.cancelTabsRealign();
-    for (const delay of REALIGN_DELAYS) {
-      this.realignTimers.push(setTimeout((): void => {
-        this.forceTabsToSelected();
-      }, delay));
-    }
-  }
-
-  private cancelTabsRealign(): void {
-    for (const timer of this.realignTimers) {
-      clearTimeout(timer);
-    }
-    this.realignTimers = [];
-  }
-
-  /**
-   * 把 Tabs 强行掰到真源那一页。
-   * ⚠️ 这里**不看** `tabsIndex`：越界那次 changeIndex 被忽略时它已经被写成目标值了，
-   *   再拿它判断就会永远跳过纠偏（这正是"页签显示 A、内容是第 1 组"的原因）。
-   */
-  private forceTabsToSelected(): void {
-    const target: number = this.indexForGroup(this.app.selectedGroupId);
-    if (target < 0) {
-      return;
-    }
-    this.groupIndex = target;
-    this.tabsController.changeIndex(target);
-    this.syncVisibleRows();
-  }
 
   /**
    * 页签下标跟着 `AppState.selectedGroupId` 走。
@@ -426,7 +376,7 @@ export struct ProfilesPage {
 
   /**
    * 点分组页签：① 写 AppState（按 id 落盘，重进软件/重建组件都能回到这一组）；
-   * ② 让系统 Tabs 切到这一页；③ 该分组自己的 Scroll 回到顶部。
+   * ② `groupIndex` 一变 Swiper 就带着动画切过去；③ 该分组自己的 Scroll 回到顶部。
    */
   private selectGroup(index: number): void {
     const group: ProfileGroup | undefined = this.app.groups[index];
@@ -435,12 +385,9 @@ export struct ProfilesPage {
     }
     hilog.info(DOMAIN, TAG, '[profiles-tab] select index=%{public}d group=%{public}s nodes=%{public}d',
       index, group.id, this.app.groupNodeCount(group.id));
-    // 用户自己点了页签：别再让启动时排的重试把他拽回去
-    this.cancelTabsRealign();
+    // 改 groupIndex 就等于切页（Swiper 的 index 绑着它），内容与页签条不会各走各的
     this.groupIndex = index;
     this.app.selectGroupById(group.id);
-    this.tabsController.changeIndex(index);
-    this.tabsIndex = index;
     this.syncVisibleRows();
     // 该分组自己的 Scroll 回到顶部（每页一个 Scroller）
     try {
@@ -450,12 +397,7 @@ export struct ProfilesPage {
     }
   }
 
-  private tabsController: TabsController = new TabsController();
-  private tabsIndex: number = 0;
-  /** 上一次同步时看到的分组数（判断 TabContent 子节点是否刚重建过） */
-  private tabsGroupCount: number = 0;
-  /** 启动阶段把 Tabs 对齐到真源用的定时器（页面销毁/用户手动切页时清掉） */
-  private realignTimers: Array<number> = [];
+
   private pageScrollers: Map<string, Scroller> = new Map<string, Scroller>();
 
   private scrollerFor(key: string): Scroller {
@@ -1263,7 +1205,6 @@ export struct ProfilesPage {
     this.app.unsubscribe(this.onBusinessChanged);
     this.runtime.unsubscribe(this.onRuntimeChanged);
     this.stateSubscribed = false;
-    this.cancelTabsRealign();
   }
 
   private onBusinessChanged = (): void => {
@@ -1273,6 +1214,23 @@ export struct ProfilesPage {
   private onRuntimeChanged = (): void => {
     this.syncRuntimeView();
   };
+
+  /** 一个分组都没有时的占位（这时不渲染 Swiper：它要至少一页才有意义） */
+  @Builder
+  private emptyGroupsHint() {
+    Column({ space: 10 }) {
+      SymbolGlyph($r('sys.symbol.list_bullet'))
+        .fontSize(38)
+        .fontColor([Theme.TEXT_3])
+      Text('还没有分组')
+        .fontSize(15)
+        .fontColor(Theme.TEXT_1)
+    }
+    .width('100%')
+    .layoutWeight(1)
+    .justifyContent(FlexAlign.Center)
+    .alignItems(HorizontalAlign.Center)
+  }
 
   @Builder
   private groupPage(group: ProfileGroup | undefined, showAll: boolean) {
@@ -1414,52 +1372,45 @@ export struct ProfilesPage {
         .padding({ left: Space.PAGE, right: Space.PAGE })
       }
 
-      // 每个分组 = 一个 TabContent；切换动画交给系统 Tabs（不自己写 translate/animateTo）
-      // ⚠️ 这里刻意**不带 index**（只给 controller）：带 index 等于每次重建都强制跳页，
-      // 会把"切分组的平移动画"吃掉；首帧要落到恢复的分组，靠 syncBusinessView 里的
-      // realignTabsToSelectedGroup()（延后一帧、子节点建好后）来对齐。
-      Tabs({ barPosition: BarPosition.Start, controller: this.tabsController }) {
-        if (this.app.groups.length === 0) {
-          TabContent() {
-            this.groupPage(undefined, true)
-          }
-        } else {
-          ForEach(this.app.groups, (group: ProfileGroup, index: number) => {
-            TabContent() {
+      /**
+       * 每个分组 = Swiper 的一页。
+       *
+       * ★ 为什么从 Tabs 换成 Swiper（2026-11-20 甲方："分组的改法不好，换个方案"）：
+       *   Tabs 的"当前页"是**内部状态**，只能靠 `changeIndex()` 去推；分组列表从 0 变成 n 的那一帧
+       *   子节点还没建好，`changeIndex(A)` 会被当成越界忽略 ⇒ 页签条（我自己画的）显示 A、
+       *   内容却是第 1 组。之前用"延后一帧/多次重试"去补，本质是在和框架的时序赌博。
+       *   Swiper 的 `index` 是**受控属性**：页面由 `groupIndex` 唯一决定，重建多少次都落在同一页，
+       *   不需要控制器、不需要定时器；切换时 Swiper 自己带平移动画（duration 240ms）。
+       *   `disableSwipe(true)` 保持"只能用上方页签条切组"（与原来 Tabs.scrollable(false) 一致）。
+       */
+      if (this.groupCount === 0) {
+        this.emptyGroupsHint()
+      } else {
+        Swiper() {
+          ForEach(this.app.groups, (group: ProfileGroup) => {
+            Column() {
               this.groupPage(group, false)
             }
+            .width('100%')
+            .height('100%')
           }, (group: ProfileGroup) => `group_page_${group.id}`)
         }
+        .width('100%')
+        .layoutWeight(1)
+        .index(this.groupIndex)
+        .indicator(false)
+        .loop(false)
+        .disableSwipe(true)
+        .duration(240)
+        .curve(Curve.FastOutSlowIn)
+        .onChange((index: number) => {
+          // 只在"页面确实换了"时同步下标（切页由 groupIndex 驱动，这里正常不会改到别的值）
+          if (index !== this.groupIndex) {
+            this.groupIndex = index;
+            this.syncVisibleRows();
+          }
+        })
       }
-      .width('100%')
-      .layoutWeight(1)
-      .barHeight(0)
-      .animationDuration(240)
-      .scrollable(false)
-      .onChange((index: number) => {
-        // 点页签时 selectGroup 会先把 groupIndex 写掉，这里**不能**因为相等就跳过同步：
-        // 系统回调才是「这一页真的到位」的唯一信号，行模型/计数都按它重算一次。
-        const changed: boolean = index !== this.groupIndex || index !== this.tabsIndex;
-        this.tabsIndex = index;
-        this.groupIndex = index;
-        /**
-         * ⚠️ 这里**不要**把 index 写回 AppState/偏好：首帧 Tabs 会先落到第 0 页
-         * （分组列表当时还没建好），拿它当真源就会把"上次停在第 3 个分组"覆盖成第 1 个。
-         * 反过来：真源里记着别的分组而系统回调报了个不一样的页，说明是布局时序问题，
-         * 立刻把页签拉回真源那页（用户点页签的路径先写真源再切页，不会走到这里）。
-         */
-        const targetId: string = this.app.selectedGroupId;
-        const targetIndex: number = this.indexForGroup(targetId);
-        if (targetIndex >= 0 && targetIndex !== index) {
-          this.groupIndex = targetIndex;
-          this.tabsIndex = targetIndex;
-          this.tabsController.changeIndex(targetIndex);
-        }
-        this.syncVisibleRows();
-        if (changed) {
-          hilog.info(DOMAIN, TAG, '[profiles-tab] onChange index=%{public}d', index);
-        }
-      })
 
       }
 

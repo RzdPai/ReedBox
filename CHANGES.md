@@ -1876,3 +1876,53 @@ permissions       = INTERNET / GET_NETWORK_INFO / KEEP_BACKGROUND_RUNNING / GET_
 | `dist/ReedBox-unsigned.hap`(debug) | 15,524,225 B | `DD9D27EB1F6B0C4D43EA9EE0B33B691BDA2DCBD52DADC45B94EBCC2C8903A932` |
 
 三个都传了 WebDAV（回读哈希一致），未发 GitHub Release。
+
+## 2026-11-20 分组页签换成 Swiper 受控方案（0.5.68）
+
+甲方："那个分组的改法不好，你换个方案"（指 0.5.67 的"0/120/400/1000ms 多次重试 changeIndex"）。
+
+### 一、为什么那套不好
+
+本质是**在和框架的时序赌博**：Tabs 的"当前页"是内部状态，只能靠 `changeIndex()` 去推；
+子节点没建好时那次调用会被静默丢弃，于是要一次次猜"现在建好了没有"。而且它还依赖一个坏判据
+（`tabsIndex` 在越界那次已经被写成目标值，用它判断要不要纠偏会永远跳过）。
+
+### 二、新方案：内容页由 **Swiper 的受控 `index`** 决定，不再有第二份状态
+
+```
+Swiper() { ForEach(groups, g => Column() { this.groupPage(g, false) }) }
+  .index(this.groupIndex)     // ← 唯一真源：页面 = f(groupIndex)
+  .disableSwipe(true)         // 仍然只能用上方页签条切组
+  .indicator(false).loop(false).duration(240).curve(Curve.FastOutSlowIn)
+  .onChange(i => { if (i !== this.groupIndex) { this.groupIndex = i; this.syncVisibleRows(); } })
+```
+
+- 页签条由 `groupIndex` 画、内容也由 `groupIndex` 决定 ⇒ **两处不可能再对不上**；
+- 重建多少次都落在同一页，不需要控制器、不需要定时器、不需要"延后对齐"；
+- 切换仍有系统平移动画（Swiper 的 duration/curve）；
+- 一个分组都没有时不渲染 Swiper，改为占位（`emptyGroupsHint()`）；
+- 删掉的东西：`TabsController` / `tabsIndex` / `tabsGroupCount` / `REALIGN_DELAYS` /
+  `realignTimers` / `scheduleTabsRealign` / `cancelTabsRealign` / `forceTabsToSelected`，以及 `build()` 里的 Tabs 块。
+
+### 三、自检
+
+`tools/check-state-chain.cjs` 的"切分组"那条断言整体改写：
+必须出现 `Swiper()` + `.index(this.groupIndex)` + `.disableSwipe(true)` + `.duration(240)`；
+**不许**再出现 `TabsController/TabContent/realignTimers/REALIGN_DELAYS/forceTabsToSelected`。
+总数仍 80 项，全 PASS。
+
+### 四、交付
+
+版本 **0.5.68 / 500068**（Release SDK 26.0.0.105：`apiReleaseType: Release`、`debug:false`），两层 `verify-app` 通过。
+
+| 文件 | 大小 | SHA256 |
+| --- | --- | --- |
+| `dist/ReedBox-signed.app` | 13,545,988 B | `0819CD3B555357EFB85AAEEC765F36D713A6256C078F48B0EEC8E2302E1DA559` |
+| `dist/ReedBox-signed.hap` | 14,281,060 B | `F59E7E5A483D265E48DEFBB090A46CF3127D5F96322409BC733F4CA1B1CA8925` |
+| `dist/ReedBox-unsigned.hap`(debug) | 15,520,299 B | `E009C0487A797113071FF16FB4FFAFC27A6F8408040DD18CD79AE62E1F3D65F2` |
+
+三个都传了 WebDAV（回读哈希一致），未发 GitHub Release。
+
+### 五、真机待验
+
+选 A 分组 → 杀进程 → 重开：页签高亮与列表内容必须都是 A；顺手看切分组动画是否还在（Swiper 的平移动画）。

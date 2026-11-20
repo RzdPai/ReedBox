@@ -692,20 +692,17 @@ async function main() {
     assert.match(seg, /CapsuleSegmentButtonV2\(\{/);
     assert.match(seg, /@Local items: SegmentButtonV2Items = new SegmentButtonV2Items\(\[\]\);/);
     assert.doesNotMatch(seg, /this\.segWidth\(\)/);
-    // 切分组：**系统 Tabs** 负责切换动画（不再自绘 translate/animateTo）
+    // 切分组：**Swiper 受控 index** 决定内容页（甲方 2026-11-20 否掉了 Tabs + 延后对齐那套）
     const home2 = source('ui/neko/ProfilesPage.ets');
-    assert.match(home2, /private tabsController: TabsController = new TabsController\(\);/);
-    // 只给 controller（带 index 会吃掉切页动画）；首帧对齐靠延后一帧的一次性 realign
-    assert.match(home2, /Tabs\(\{ barPosition: BarPosition\.Start, controller: this\.tabsController \}\)/);
-    // 启动阶段对齐页签：必须是"多档重试"而不是一次性 setTimeout（子节点在后续帧才建好）
-    assert.match(home2, /private forceTabsToSelected\(\): void \{/);
-    assert.match(home2, /const REALIGN_DELAYS: Array<number> = \[0, 120, 400, 1000\];/);
-    assert.match(home2, /this\.scheduleTabsRealign\(\);/);
-    assert.match(home2, /this\.realignTimers\.push\(setTimeout\(\(\): void => \{/);
-    assert.match(home2, /\.animationDuration\(\d+\)/);
-    assert.match(home2, /this\.tabsController\.changeIndex\(index\);/);
-    // 系统回调不能把页签写回真源（首帧会先落到 0，写了就把恢复的分组覆盖掉）
-    assert.doesNotMatch(home2.slice(home2.indexOf('.onChange((index: number)'), home2.indexOf('.onChange((index: number)') + 1200), /selectGroupById/);
+    assert.match(home2, /Swiper\(\) \{/);
+    // 内容页由 groupIndex 唯一决定 ⇒ 页签条与列表不可能各走各的
+    assert.match(home2, /\.index\(this\.groupIndex\)/);
+    assert.match(home2, /\.disableSwipe\(true\)/);
+    assert.match(home2, /\.duration\(240\)/);
+    // 不许再出现"控制器 + 定时器对齐"那套
+    assert.doesNotMatch(home2, /TabsController|TabContent|realignTimers|REALIGN_DELAYS|forceTabsToSelected/);
+    // 页签回调不许把 index 写回真源（切换由 groupIndex 驱动）
+    assert.doesNotMatch(home2.slice(home2.indexOf('.onChange((index: number)'), home2.indexOf('.onChange((index: number)') + 600), /selectGroupById/);
     assert.match(home2, /ForEach\(this\.groupRowsFor\(/);
     assert.doesNotMatch(home2, /listShift|listAlpha|groupSwitchGen/);
     // ★ ForEach 同 key 不会重跑 itemGenerator ⇒ 行模型必须按 id 复用（否则切节点 UI 不刷新）
