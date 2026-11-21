@@ -853,10 +853,14 @@ export struct SettingsTab {
             .borderRadius(18)
             .backgroundColor(Theme.SURFACE)
           }
+          // 末尾呼吸位用列表项给（padding 会连滚动视口一起裁掉，底部会露出页面底色）
+          ListItem() {
+            Row().width('100%').height(8)
+          }
         }
         .width('100%')
         .layoutWeight(1)
-        .padding({ left: Space.PAGE, right: Space.PAGE, bottom: 8 })
+        .padding({ left: Space.PAGE, right: Space.PAGE })
         .scrollBar(BarState.Off)
         .edgeEffect(EdgeEffect.Spring)
     }

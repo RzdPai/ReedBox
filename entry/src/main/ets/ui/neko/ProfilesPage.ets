@@ -1286,10 +1286,16 @@ export struct ProfilesPage {
             .height(this.tailSpacer())
         }
       }
+      // 末尾呼吸位用**列表项**给，不要用容器 padding：
+      // List 的 padding 会把滚动视口一起裁掉 ⇒ 滚动中内容在离屏幕底 8vp 处被切断，露出页面底色
+      // （甲方 2026-11-21 截图）。列表项只是内容末尾的空白，视口仍然铺到屏幕物理底。
+      ListItem() {
+        Row().width('100%').height(8)
+      }
     }
     .width('100%')
     .height('100%')
-    .padding({ left: Space.PAGE, right: Space.PAGE, bottom: 8 })
+    .padding({ left: Space.PAGE, right: Space.PAGE })
     .scrollBar(BarState.Off)
     .edgeEffect(EdgeEffect.Spring)
   }
@@ -1413,14 +1419,6 @@ export struct ProfilesPage {
       }
 
       }
-      /**
-       * ★ 内容列必须**明确占满整屏**：以前这里没有宽高，Column 是"包住内容"的高度，
-       *   里面的 `layoutWeight(1)`（Tabs/Swiper）拿到的高度就成了不确定值，
-       *   列表到不了屏幕物理底，最下面留出一条背景色空档（甲方 2026-11-21 截图："下面有一点点空白"）。
-       *   页根已经开了全屏布局 + expandSafeArea/ignoreLayoutSafeArea，所以 100% 就是屏幕物理高。
-       */
-      .width('100%')
-      .height('100%')
 
       Column({ space: 10 }) {
         Row() {

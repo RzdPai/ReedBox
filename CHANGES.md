@@ -1955,3 +1955,45 @@ Swiper() { ForEach(groups, g => Column() { this.groupPage(g, false) }) }
 | `dist/ReedBox-unsigned.hap`(debug) | 15,520,447 B | `955D1D555F8D9D9B62C7B4B14795B3F1EF2BF827213E201773292D8AAE3E03EC` |
 
 三个都传了 WebDAV（回读哈希一致），未发 GitHub Release。
+
+## 2026-11-21 底部空档真因：**List 容器的 padding 把滚动视口一起裁掉了**（0.5.70）
+
+上一轮（0.5.69）我猜的是"内容列没有高度"，甲方装上后："一样的情况，说明问题不在这" —— 已撤掉。
+这次把截图逐像素量了一遍再动手。
+
+### 一、证据（截图量出来的，不是猜的）
+
+对甲方两张截图做逐行取色：
+
+- 页面底色 `#0E0E0F` = (14,14,14)；卡片 `surface #1A1A1B` = (26,26,27)；手势条药丸 = (153,153,153)。
+- 列表内容在离屏幕物理底 **约 21~27px（≈8vp）** 处被切断，下面是一条纯页面底色。
+- 8vp 正好等于列表容器上的 `padding({ bottom: 8 })`。
+
+结论：**`List` 的 padding 是"视口内缩"**，不是"内容末尾留白"。所以无论滚到哪，
+内容都会在离屏幕底 8vp 处被裁掉、露出底色 —— 现象就是"下面有一点点空白，挡住了内容"。
+
+### 二、修法（5 个列表页统一）
+
+- 列表容器 `.padding({ left, right, bottom: 8 })` → 去掉 `bottom`；
+- 末尾呼吸位改由**一个空白 ListItem**提供（`Row().width('100%').height(8)`）：
+  它只是内容的一部分，滚动视口仍然铺到屏幕物理底。
+- 覆盖：首页分组列表、分组页、路由页、设置页、日志页。
+  `AboutPage` 是 `Scroll` + 内容列 padding（不动视口），不用改。
+
+### 三、自检
+
+把原来那条"必须存在 `bottom: 8 })`"的断言**反过来**：
+五个列表页 `doesNotMatch(/padding({ left: Space.PAGE, right: Space.PAGE, bottom: 8 })/)`
+且必须有 8vp 的末尾空白项；`AboutPage` 豁免。80/80 PASS。
+
+### 四、交付
+
+版本 **0.5.70 / 500070**（Release SDK，`apiReleaseType: Release`、`debug:false`），两层 `verify-app` 通过。
+
+| 文件 | 大小 | SHA256 |
+| --- | --- | --- |
+| `dist/ReedBox-signed.app` | 13,547,018 B | `491E1020678480CFFA2C4CF088A79A999E4E13EDAC211DAC3A2539CF1EC95638` |
+| `dist/ReedBox-signed.hap` | 14,285,773 B | `3397C9B44BF7D48247099AB13F47EFB8DD0ABA6CE8494FF7BF9D396CA83BF7C2` |
+| `dist/ReedBox-unsigned.hap`(debug) | 15,528,325 B | `00A6E1D8C26F235B7C8C6D17D1DFF130A7855935D00D4421099DCACDF96C17ED` |
+
+三个都传了 WebDAV（回读哈希一致），未发 GitHub Release。

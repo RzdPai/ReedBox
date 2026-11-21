@@ -649,13 +649,21 @@ async function main() {
     assert.match(shell, /\.padding\(\{ top: this\.topInset\(\) \}\)/);
     assert.match(shell,
       /\.ignoreLayoutSafeArea\(\[LayoutSafeAreaType\.SYSTEM\], \[LayoutSafeAreaEdge\.TOP, LayoutSafeAreaEdge\.BOTTOM\]\)/);
-    // 列表/滚动容器不许再叠底部留白；只有悬浮层（FAB/状态卡）可以让 navBottom，避免被手势条压住
+    // 列表容器不许再叠底部留白；只有悬浮层（FAB/状态卡）可以让 navBottom，避免被手势条压住
     for (const rel of ['ui/neko/ProfilesPage.ets', 'ui/neko/GroupsPage.ets', 'ui/neko/RouteTab.ets',
       'ui/neko/SettingsTab.ets', 'ui/neko/LogsPage.ets', 'ui/neko/AboutPage.ets']) {
       const text = source(rel);
       const listPads = text.match(/\.padding\(\{[^}]*bottom: Metrics\.get\(\)\.navBottom[^}]*\}\)/g) ?? [];
       assert.ok(listPads.length <= 1, rel);   // 只允许悬浮层那一处
-      assert.match(text, /bottom: 8 \}\)|bottom: Metrics\.get\(\)\.navBottom \+ 12 \}\)/, rel);
+      /**
+       * ★ 甲方 2026-11-21：列表容器上带 `bottom: N` 会把**滚动视口**一起裁掉 ——
+       *   滚动中内容在离屏幕底 N 处被切断、露出页面底色（看起来像"被挡住"）。
+       *   呼吸位改由末尾一个 8vp 的空白 ListItem 提供，视口铺到屏幕物理底。
+       */
+      assert.doesNotMatch(text, /\.padding\(\{ left: Space\.PAGE, right: Space\.PAGE, bottom: 8 \}\)/, rel);
+      if (rel !== 'ui/neko/AboutPage.ets') {   // AboutPage 是 Scroll+内容列 padding，不是列表视口
+        assert.match(text, /ListItem\(\) \{\s*\n\s*Row\(\)\.width\('100%'\)\.height\(8\)/, rel);
+      }
     }
   });
   checked('App icon is a single flat 1024 tile (no layered white-card foreground)', () => {
