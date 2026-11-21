@@ -1926,3 +1926,32 @@ Swiper() { ForEach(groups, g => Column() { this.groupPage(g, false) }) }
 ### 五、真机待验
 
 选 A 分组 → 杀进程 → 重开：页签高亮与列表内容必须都是 A；顺手看切分组动画是否还在（Swiper 的平移动画）。
+
+## 2026-11-21 列表到不了屏幕最底（内容列没有明确高度，0.5.69）
+
+甲方截了底部：卡片下面留了一条背景色空档，内容没铺进底部。
+
+### 根因
+
+`ProfilesPage` 的页根是 `Stack { Column { 页头 / 页签条 / 搜索 / Swiper }  … FAB }`，
+但那个**内容列 `Column` 从来没写宽高** ⇒ 它在 `Stack` 里是"包住内容"的高度。
+里面的 `layoutWeight(1)`（原来是 Tabs、现在 Swiper）在**高度不确定的父容器**里拿到的高度也是不确定的，
+于是列表止步于"内容高度之和"，最下面留出几十像素的页面底色。
+（页根的全屏 + `expandSafeArea/ignoreLayoutSafeArea` 一直是好的，所以 100% 就等于屏幕物理高。）
+
+### 修法
+
+给内容列补上 `.width('100%').height('100%')` —— 一行，`layoutWeight(1)` 才有确定的余量可分配，
+列表就一直铺到屏幕物理底（这也是第五十/五十一轮定的"内容铺到屏幕物理底"口径）。
+
+### 自检
+
+80/80 PASS（无状态链改动）。版本 **0.5.69 / 500069**，Release SDK，两层 `verify-app` 通过。
+
+| 文件 | 大小 | SHA256 |
+| --- | --- | --- |
+| `dist/ReedBox-signed.app` | 13,546,017 B | `56D6FA4AC8B0C476EA29D074927687FFE4F629633BB8AE95519591CE78BB9A50` |
+| `dist/ReedBox-signed.hap` | 14,281,010 B | `93F4426F85348D277E171E0552117ADBF3DDC09D927DA2DE475FDF4C07C081C0` |
+| `dist/ReedBox-unsigned.hap`(debug) | 15,520,447 B | `955D1D555F8D9D9B62C7B4B14795B3F1EF2BF827213E201773292D8AAE3E03EC` |
+
+三个都传了 WebDAV（回读哈希一致），未发 GitHub Release。
