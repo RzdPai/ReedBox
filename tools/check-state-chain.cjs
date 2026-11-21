@@ -1227,6 +1227,55 @@ async function main() {
   });
 
   // ---- 剪贴板：不声明受限权限，一律走官方安全控件（甲方 2026-11-17 要求删掉 READ_PASTEBOARD）----
+  checked('Every popup menu anchors on an id that actually exists', () => {
+    /**
+     * ★ 甲方 2026-11-21：左滑"分享"点了没反应 —— 菜单锚点写的是 `profile_share_${id}`，
+     *   而全工程没有任何节点挂过这个 id，`getPromptAction().openMenu(node, { id })` 找不到锚点就静默失败。
+     *   这条检查把"menu.open 的锚点"和"节点上的 id"对起来，防止再犯。
+     */
+    const files = [];
+    const walk = (dir) => {
+      for (const name of fs.readdirSync(dir)) {
+        const full = path.join(dir, name);
+        const st = fs.statSync(full);
+        if (st.isDirectory()) {
+          walk(full);
+        } else if (name.endsWith('.ets')) {
+          files.push(full);
+        }
+      }
+    };
+    walk(path.join(ets, 'ui'));
+    const all = files.map((f) => fs.readFileSync(f, 'utf8')).join('\n');
+    // 锚点写法①：`prefix_${expr}`   ②：'plainId'   ③：这个组件传进来的 @Param anchorId
+    const anchors = [];
+    const re = /menu\.open\([^,]+,\s*(`([A-Za-z_]+_)\$\{[^}]+\}`|'([A-Za-z_]+)'|this\.\w*[Aa]nchor\w*)/g;
+    let m;
+    while ((m = re.exec(all)) !== null) {
+      if (m[2] !== undefined) {
+        anchors.push({ kind: 'prefix', value: m[2] });
+      } else if (m[3] !== undefined) {
+        anchors.push({ kind: 'plain', value: m[3] });
+      } else {
+        anchors.push({ kind: 'param', value: m[1] });
+      }
+    }
+    assert.ok(anchors.length >= 4, `只找到 ${anchors.length} 处 menu.open`);
+    for (const a of anchors) {
+      if (a.kind === 'prefix') {
+        // 模板锚点：节点那边必须有 .id(`<同一前缀>...`)
+        assert.ok(all.includes(`.id(\`${a.value}`), `菜单锚点前缀 ${a.value} 没有对应的 .id() 定义`);
+      } else if (a.kind === 'plain') {
+        assert.ok(all.includes(`.id('${a.value}')`) || all.includes(`anchorId: '${a.value}'`)
+          || all.includes(`anchorId: "${a.value}"`) || all.includes(`menuAnchorId: '${a.value}'`),
+          `菜单锚点 ${a.value} 没有对应的 .id()/anchorId 定义`);
+      } else {
+        // @Param anchorId 透传：节点那边用 .id(this.anchorId)
+        assert.ok(all.includes('.id(this.anchorId)'), 'anchorId 透传的锚点没有落到 .id(this.anchorId)');
+      }
+    }
+  });
+
   checked('The restricted pasteboard permission is not declared, and reads go through PasteButton', () => {
     const manifest = fs.readFileSync(path.join(ets, '..', 'module.json5'), 'utf8');
     assert.doesNotMatch(manifest, /"ohos\.permission\.READ_PASTEBOARD"\s*[,}]/);

@@ -735,12 +735,18 @@ export struct ProfilesPage {
   }
 
 
+  /**
+   * 左滑"分享"：菜单锚点必须挂在**已存在的节点**上。
+   * ★ 这里原来写的是 `profile_share_${p.id}` —— 全工程没有任何地方 `.id(...)` 过它，
+   *   `getPromptAction().openMenu(node, { id: anchor })` 找不到锚点就静默失败（只在日志里留一句），
+   *   表现就是"点分享没反应"（甲方 2026-11-21）。卡片上确实存在的 id 是 `profile_more_${id}`。
+   */
   private openShareMenu(p: Profile): void {
     const items: Array<MenuItemData> = [
       new MenuItemData('复制分享链接', false, $r('sys.symbol.doc_plaintext')),
       new MenuItemData('复制出站配置 JSON', false, $r('sys.symbol.doc_text'))
     ];
-    this.menu.open(this.getUIContext(), `profile_share_${p.id}`, items, (index: number) => {
+    this.menu.open(this.getUIContext(), `profile_more_${p.id}`, items, (index: number) => {
       if (index === 0) {
         const link: string = exportProfileLink(p);
         if (link.length === 0) {

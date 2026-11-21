@@ -1997,3 +1997,70 @@ Swiper() { ForEach(groups, g => Column() { this.groupPage(g, false) }) }
 | `dist/ReedBox-unsigned.hap`(debug) | 15,528,325 B | `00A6E1D8C26F235B7C8C6D17D1DFF130A7855935D00D4421099DCACDF96C17ED` |
 
 三个都传了 WebDAV（回读哈希一致），未发 GitHub Release。
+
+## 2026-11-21 正式签名包 + GitHub Release（0.5.70，甲方点名发版）
+
+甲方："构建正式签名.app吧。顺带发到 Github（发未签名 .hap 包），内容就写修复了部分已知问题。"
+
+### 一、正式签名包（Release SDK，可直接投 AGC）
+
+| 文件 | 大小 | SHA256 | 用途 |
+| --- | --- | --- | --- |
+| `dist/ReedBox-signed.app` | 13,547,018 B | `491E1020678480CFFA2C4CF088A79A999E4E13EDAC211DAC3A2539CF1EC95638` | 上架 AGC |
+| `dist/ReedBox-signed.hap` | 14,285,773 B | `3397C9B44BF7D48247099AB13F47EFB8DD0ABA6CE8494FF7BF9D396CA83BF7C2` | 单 HAP 侧载 |
+| `dist/ReedBox-unsigned.hap` | 15,528,325 B | `00A6E1D8C26F235B7C8C6D17D1DFF130A7855935D00D4421099DCACDF96C17ED` | GitHub 发布用 |
+
+- 内层 HAP：`0.5.70 / 500070`、`apiReleaseType: Release`、`compileSdkVersion 26.0.0.105`、`debug: false`；
+- 两层 `verify-app` 通过（外壳 + 内层），签名用 `.sign/RzdPai-release.p12`（发布证书链）；
+- 三个文件在 WebDAV 根目录（覆盖式，回读哈希一致）。
+
+### 二、GitHub Release
+
+- 标签 `v0.5.70`（指向 `9c60eef`），名称 `ReedBox 0.5.70`，说明就一句 **"修复了部分已知问题"**（甲方要求，不加别的）；
+- 资产 `ReedBox-0.5.70-unsigned.hap`（15,528,325 B，与本地一致；沿用 v0.5.60 的命名习惯）；
+- 地址：https://github.com/RzdPai/ReedBox/releases/tag/v0.5.70
+
+### 三、备注
+
+- 本轮只是出包 + 发版，没有代码改动，按交付纪律**不提交 git**（文档改动留在工作区）。
+- 本机到 GitHub 的资产 CDN（objects.githubusercontent.com）不稳，回读校验以 API 元数据（size/state=uploaded）为准。
+
+## 2026-11-21 左滑「分享」点了没反应（菜单锚点根本不存在，0.5.71）
+
+甲方：首页左滑出来的「分享」按钮点了没反应。
+
+### 一、真因：菜单锚点写了个"不存在的 id"
+
+`openShareMenu()` 走的是 `ctx.getPromptAction().openMenu(node, { id: anchorId }, options)`，
+锚点必须是**当前节点树里真实存在**的 `.id(...)`。而这里写的是 `` `profile_share_${p.id}` ``：
+
+- 卡片上实际挂的 id 只有 `` `profile_more_${id}` ``（整张卡）和 `` `profile_more_btn_${id}` ``（右上角图标）；
+- 全工程没有任何节点挂过 `profile_share_*` ⇒ `openMenu` 找不到锚点**静默失败**
+  （只在 hilog 里留一句 `openMenu failed`），表现就是"点了没反应"。
+
+这是重构遗留：早先行内可能真有一颗"分享"按钮带这个 id，后来行内只留了一颗菜单图标，锚点没跟着改。
+
+### 二、修法
+
+- `openShareMenu()` 的锚点改成卡片上确实存在的 `` `profile_more_${p.id}` ``（与行菜单同一个锚点，位置也合理）。
+- 同类隐患一并修：`GroupsPage` 的 `openGroupMenu()` 用 `` `group_menu_${g.id}` ``，同样从没挂过 id ⇒ 给分组卡片补 `.id()`。
+  （`openGroupMenu()` 目前还没有入口调用，是死代码；要不要接上入口另说，先把锚点补正确。）
+
+### 三、自检：新增一条"菜单锚点必须存在"
+
+81 项（原 80）：扫描所有 `menu.open(...)` 的锚点写法 ——
+模板锚点（`` `prefix_${expr}` ``）必须在节点上找到 `.id(`` `prefix_ ``…；
+字符串锚点必须有 `.id('x')` / `anchorId: 'x'` / `menuAnchorId: 'x'`；`@Param anchorId` 透传必须有 `.id(this.anchorId)`。
+**实测有效**：把锚点临时改回 `profile_share_` 后该条立刻失败（`菜单锚点前缀 profile_share_ 没有对应的 .id() 定义`）。
+
+### 四、交付
+
+版本 **0.5.71 / 500071**（Release SDK，`apiReleaseType: Release`、`debug:false`），两层 `verify-app` 通过。
+
+| 文件 | 大小 | SHA256 |
+| --- | --- | --- |
+| `dist/ReedBox-signed.app` | 13,547,026 B | `C6C31833D1266EEA9A8E9EDDD8E8C267FFA98594B9AC315CF5B3D916439A0EB6` |
+| `dist/ReedBox-signed.hap` | 14,285,741 B | `C5E1F857603AAF B07B004B566C21ADB7E4E48261881C3140EEDCCCDE5A050327` |
+| `dist/ReedBox-unsigned.hap`(debug) | 15,528,464 B | `AEF39B73E001A5F0100DDB025E8AFA7BE0421ABCF57ADED831D69466E3B2EC71` |
+
+三个都传了 WebDAV（回读哈希一致），未发 GitHub Release。

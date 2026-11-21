@@ -80,5 +80,6 @@ Validation: source/host logic only. ArkUI decorators are stripped for the mock h
 - PASS: Only kernel-known VLESS flows survive import
 - PASS: An unsupported transport is neutralised at import, the node is kept and explained in the log
 - PASS: The generated outbound never emits a bogus flow or transport type
+- PASS: Every popup menu anchors on an id that actually exists
 - PASS: The restricted pasteboard permission is not declared, and reads go through PasteButton
 - PASS: All ETS sources meet the V2 and Navigation constraints

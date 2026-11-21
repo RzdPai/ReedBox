@@ -209,6 +209,9 @@ export struct GroupsPage {
     .padding(14)
     .borderRadius(18)
     .backgroundColor(Theme.SURFACE)
+    // 分组菜单的锚点：`openGroupMenu()` 用的是 `group_menu_${g.id}`，以前没有任何节点挂这个 id，
+    // 一旦接上入口就会"点了没反应"（与首页"分享"是同一类 bug，2026-11-21 一并补上）
+    .id(`group_menu_${g.id}`)
   }
 
   /** 流量使用百分比（无流量信息时 0） */
