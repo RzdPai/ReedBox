@@ -2137,3 +2137,58 @@ Swiper() { ForEach(groups, g => Column() { this.groupPage(g, false) }) }
 | `dist/ReedBox-unsigned.hap`(debug) | 15,529,674 B | `90D27289DA5E824743F637D1A4C2ADFAE0112A2D3791F3B899481E0298BCBC2B` |
 
 三个都传了 WebDAV（回读哈希一致），未发 GitHub Release。
+
+## 2026-11-23 最小 SDK 提到 API 26（0.5.73）
+
+甲方："直接把最小 sdk 升到 26（华为早就全面推送 api26 的鸿蒙7了）"，本机正式版 SDK 是 26.0.0。
+
+### 一、改法（唯一有效的写法是 `"26.0.0"`）
+
+`build-profile.json5`：
+
+```diff
+-   "compatibleSdkVersion": "6.1.1(24)",
+-   "targetSdkVersion": "6.1.1(24)",
++   "compatibleSdkVersion": "26.0.0",
++   "targetSdkVersion": "26.0.0",
+```
+
+**坑**：hvigor 6.26.9 会以 `00308018 / api version parameter is illegal!` 报错退出。实测四种写法：
+
+| 写法 | 结果 |
+| --- | --- |
+| `"7.0.0(26)"` | ✗ illegal（"7.0.0" 不是这套 SDK 的平台名） |
+| `"26.0.0(26)"` | ✗ illegal |
+| `"26"` / `26` / `"26.0"` | ✗ illegal |
+| **`"26.0.0"`** | ✓ 通过（平台名就是本机 Release SDK 的 `platformVersion: 26.0.0`） |
+
+产物字段（0.5.73）：
+
+```
+compileSdkVersion = 26.0.0.105
+minAPIVersion     = 260000026      ← 26.0.0 + API26，原来是 60101024
+targetAPIVersion  = 260000026
+apiReleaseType    = Release   debug = false
+```
+
+签名时 `-compatibleVersion` 也要跟着改成 **260000026**（原来 60101024）。
+
+### 二、连带影响（已知并接受）
+
+- **API 24/25 设备装不上了**（minAPIVersion 高于设备 API 会直接判不兼容）。审核若还拿 API 24 的 MatePad 测，
+  会从"运行崩溃"变成"无法安装"。
+- `ui/SelectMaterial.ets` 里对 `uiMaterial`（API 26）的 `sdkApiVersion >= 26` 门**保留**：
+  26.0.0 起该模块才存在，门留着只是防御，不碍事。
+- 之前那轮"高于 minAPI 的 API"排查结论不变：minAPI 提到 26 后，`uiMaterial / menuSystemMaterial` 全部合法。
+
+### 三、交付
+
+版本 **0.5.73 / 500073**，两层 `verify-app` 通过。
+
+| 文件 | 大小 | SHA256 |
+| --- | --- | --- |
+| `dist/ReedBox-signed.app` | 13,545,054 B | `27A0083D299A4D1D33B179C66183C4137747D55762F8647658096A6C6871141A` |
+| `dist/ReedBox-signed.hap` | 14,278,562 B | `BB93C3DC8937C434CF178F9BD7DA31A25ECED9184452AD4DE980689076F0C904` |
+| `dist/ReedBox-unsigned.hap`(debug) | 15,518,492 B | `98664502FCFE8743C4AF1C69BF8FE416CE46D3823556BAC77FD900B105A7BB44` |
+
+三个都传了 WebDAV（回读哈希一致），未发 GitHub Release。
