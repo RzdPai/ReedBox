@@ -1227,6 +1227,30 @@ async function main() {
   });
 
   // ---- 剪贴板：不声明受限权限，一律走官方安全控件（甲方 2026-11-17 要求删掉 READ_PASTEBOARD）----
+  checked('No API above the declared minimum runs unguarded (the 0.5.71 JsCrash)', () => {
+    /**
+     * ★ 上架检测（2026-11-23，MatePad Pro 11 / HarmonyOS 6.1 / API 24）：
+     *   JsCrash at `immersiveMedium (src/main/ets/ui/SelectMaterial.ts:39:1)`。
+     *   真因：`@ohos.arkui.uiMaterial` / `Select.menuSystemMaterial` 都是 **API 26** 才有的，
+     *   本工程 minAPI=24 ⇒ 设备上 `uiMaterial` 是 undefined；旧代码把 `uiMaterial.ImmersiveStyle.REGULAR`
+     *   当**实参**写在 `immersiveMedium()` 里，那句在进入 try 之前就求值 ⇒ try 兜不住，必崩。
+     *   这条检查钉住三条：① 触碰 uiMaterial 前必须先看 sdkApiVersion；② 枚举不许出现在实参位置；
+     *   ③ menuSystemMaterial 的调用必须在 sdkApiVersion 门之后。
+     */
+    const src = source('ui/SelectMaterial.ets');
+    assert.match(src, /if \(deviceInfo\.sdkApiVersion < MATERIAL_MIN_API\) \{/);
+    assert.doesNotMatch(src, /immersiveMaterial\(uiMaterial\./, '枚举值不许写在实参里（在调用方求值，try 兜不住）');
+    // menuSystemMaterial 必须在门之后：文件里出现位置要在 sdkApiVersion 判断之后
+    const gateAt = src.indexOf('if (deviceInfo.sdkApiVersion < MATERIAL_MIN_API)');
+    const callAt = src.indexOf('instance.menuSystemMaterial(');
+    assert.ok(gateAt > 0 && callAt > gateAt, 'menuSystemMaterial 必须在 sdkApiVersion 判断之后调用');
+    // 其它界面文件不许自己碰 API26 的材质接口（注释里提名字没关系，只看代码）
+    for (const rel of ['ui/CommonUi.ets', 'ui/neko/ProfilesPage.ets', 'ui/neko/SettingsTab.ets']) {
+      const code = source(rel).replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+      assert.doesNotMatch(code, /menuSystemMaterial\s*\(|uiMaterial\./, rel);
+    }
+  });
+
   checked('Every popup menu anchors on an id that actually exists', () => {
     /**
      * ★ 甲方 2026-11-21：左滑"分享"点了没反应 —— 菜单锚点写的是 `profile_share_${id}`，
