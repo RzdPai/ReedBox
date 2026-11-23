@@ -43,17 +43,31 @@ export function immersiveMaterial(style?: uiMaterial.ImmersiveStyle): SystemUiMa
     return undefined;
   }
   try {
-    // ★ 只有在 try 内部才允许碰 uiMaterial（老系统上它整个模块都是 undefined）
+    /**
+     * ★ 只有在 try 内部才允许碰 uiMaterial（老系统上它整个模块都是 undefined）。
+     * ★ 不再"能力探测为假就直接返回 undefined"：设备算力不够时系统会自行忽略这个可选参数，
+     *   而给 undefined 反而会掉到"系统灰表面"（RzdMusic 实测）。这里只记一条日志，照样把材质交上去。
+     */
     if (!uiMaterial.isImmersiveMaterialSupported()) {
-      hilog.info(DOMAIN, TAG, 'immersive material unsupported, fallback to blur');
-      return undefined;
+      hilog.info(DOMAIN, TAG, 'immersive material unsupported by device, let system decide');
     }
     const useStyle: uiMaterial.ImmersiveStyle = style === undefined
       ? uiMaterial.ImmersiveStyle.REGULAR : style;
+    /**
+     * 官方那套质感 = **交互形变 + 光感反馈 + 材质底色**三件一起给（照 RzdMusic 的 `RzdMaterial` 实测结论）：
+     *  · `interactive: true`            按下有形变
+     *  · `lightEffect`                  跟随触点的光效（不给就是"一块死玻璃"）
+     *  · `materialColor: glass_overlay` 材质底色（日间 20% 白纱 / 夜间 20% 黑纱，深浅色自适应资源）
+     * 缺一个肉眼就能看出"只是块半透明底板"。
+     */
     return new uiMaterial.ImmersiveMaterial({
       style: useStyle,
       applyShadow: true,
-      interactive: true
+      interactive: true,
+      materialColor: $r('app.color.glass_overlay'),
+      lightEffect: {
+        color: '#66FFFFFF'
+      }
     });
   } catch (e) {
     hilog.warn(DOMAIN, TAG, 'build material failed: %{public}s', `${(e as Error).message}`);

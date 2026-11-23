@@ -26,6 +26,7 @@ import {
   PickSheetParam,
   pressLightEffect
 } from '../CommonUi';
+import { immersiveMedium } from '../../ui/SelectMaterial';
 import { bytesText, dateText, speedText } from '../Format';
 import { Metrics } from '../Metrics';
 import { Space, Theme } from '../Theme';
@@ -1450,10 +1451,11 @@ export struct ProfilesPage {
     .height('100%')
     .backgroundColor(Theme.BG)
     .bindSheet(this.sheetOpen!!, this.sheetBody(), {
+      // API 26：面板也走系统沉浸材质（与菜单同一套玻璃），设备不支持时系统自动忽略
+      systemMaterial: immersiveMedium(),
       height: this.sheetKind === 'import' ? 420 : 400,
       dragBar: true,
       showClose: false,
-      backgroundColor: Theme.BG,
       preferType: SheetType.BOTTOM,
       onDisappear: () => {
         this.sheetOpen = false;

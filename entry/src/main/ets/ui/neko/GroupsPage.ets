@@ -16,6 +16,7 @@ import {
 } from '../CommonUi';
 import { bytesText, dateText } from '../Format';
 import { Space, Theme } from '../Theme';
+import { immersiveMedium } from '../../ui/SelectMaterial';
 
 const DOMAIN: number = 0x4e4b;
 const TAG: string = 'NekoBox-Groups';
@@ -947,6 +948,8 @@ export struct GroupsPage {
     .height('100%')
     .backgroundColor(Theme.BG)
     .bindSheet(this.sheetOpen!!, this.sheetBuild(), {
+      // API 26：面板统一走系统沉浸材质（菜单同一套玻璃），设备不支持时系统自动忽略
+      systemMaterial: immersiveMedium(),
       height: this.sheetKind === 'edit' ? (this.editKind === 'subscription' ? 600 : 340)
         : (this.typeIndex === 1 ? 660 : 300),
       dragBar: true,

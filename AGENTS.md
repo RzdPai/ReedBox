@@ -11,7 +11,7 @@ c-shared `.so`，进程内 `dlopen`，TUN fd 由 `VpnExtensionAbility` 直接交
 
 - 显示名 **ReedBox**、仓库 **https://github.com/RzdPai/ReedBox**（2026-11-16 改名/开源）；目录仍叫 `RzdBox/`
 - bundleName **`com.rzdpai.nekobox`**（**没跟着改名**：改它等于装一个新应用，老数据不迁；见项目记忆第六十三轮 A）
-- versionName **0.5.73** / versionCode **500073**（以 `AppScope/app.json5` 为准）
+- versionName **0.5.74** / versionCode **500074**（以 `AppScope/app.json5` 为准）
 - compatible/target **26.0.0**（API 26，HAP 里 `minAPIVersion=260000026`），deviceTypes phone/tablet
   （`build-profile.json5` 只能写 `"26.0.0"`；写 `"7.0.0(26)"`/`"26.0.0(26)"`/`"26"` 都会 `00308018 illegal`）
 - 状态管理**全 V2**、路由**只走 Navigation**、UI 组件优先 HDS —— 这三条是硬规则，别回退。

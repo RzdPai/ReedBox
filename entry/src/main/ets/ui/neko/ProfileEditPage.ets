@@ -18,6 +18,7 @@ import {
 import { Metrics } from '../Metrics';
 import { Space, Theme } from '../Theme';
 import { ProfileEditParam } from '../Routes';
+import { immersiveMedium } from '../../ui/SelectMaterial';
 
 const DOMAIN: number = 0x4e4b;
 const TAG: string = 'NekoBox-ProfileEdit';
@@ -1059,6 +1060,8 @@ export struct ProfileEditPage {
     .bindToScrollable([this.scroller])
     .backgroundColor(Theme.BG)
     .bindSheet(this.pickOpen!!, this.pickSheet(), {
+      // API 26：面板统一走系统沉浸材质（菜单同一套玻璃），设备不支持时系统自动忽略
+      systemMaterial: immersiveMedium(),
       height: 420,
       dragBar: true,
       showClose: false,

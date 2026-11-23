@@ -1227,6 +1227,32 @@ async function main() {
   });
 
   // ---- 剪贴板：不声明受限权限，一律走官方安全控件（甲方 2026-11-17 要求删掉 READ_PASTEBOARD）----
+  checked('Menus and sheets use the API 26 glass material instead of hand-rolled blur', () => {
+    /**
+     * 甲方 2026-11-23：主页那几个菜单要接入 API 26 的"玻璃"。
+     * 官方口径（SDK 26）：`MenuOptions`/`SheetOptions` 都有 `systemMaterial`（@since 26.0.0），
+     * 材质会接管背景/描边/投影 ⇒ **不能再同时给 backgroundBlurStyle / backgroundColor**，否则发灰。
+     * 质感三件套（照 RzdMusic 实测）：interactive + lightEffect + materialColor。
+     */
+    const sel = source('ui/SelectMaterial.ets');
+    assert.match(sel, /interactive: true/);
+    assert.match(sel, /lightEffect: \{/);
+    assert.match(sel, /materialColor: \$r\('app\.color\.glass_overlay'\)/);
+    const common = source('ui/CommonUi.ets');
+    const code = common.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+    assert.match(common, /systemMaterial: immersiveMedium\(\)/);
+    assert.doesNotMatch(code, /backgroundBlurStyle: menuBlurStyle/);
+    for (const rel of ['ui/neko/ProfilesPage.ets', 'ui/neko/GroupsPage.ets', 'ui/neko/RouteTab.ets',
+      'ui/neko/ProfileEditPage.ets', 'ui/neko/SettingsTab.ets']) {
+      assert.match(source(rel), /systemMaterial: immersiveMedium\(\)/, rel);
+    }
+    // 颜色资源必须深浅各一份
+    for (const rel of ['../resources/base/element/color.json', '../resources/dark/element/color.json']) {
+      const txt = fs.readFileSync(path.join(ets, rel), 'utf8');
+      assert.match(txt, /"name": "glass_overlay"/, rel);
+    }
+  });
+
   checked('No API above the declared minimum runs unguarded (the 0.5.71 JsCrash)', () => {
     /**
      * ★ 上架检测（2026-11-23，MatePad Pro 11 / HarmonyOS 6.1 / API 24）：

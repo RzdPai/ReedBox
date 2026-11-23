@@ -3,6 +3,7 @@ import { AppState } from '../../core/AppState';
 import { RouteRule } from '../../model/RouteRule';
 import { GlowButton, OutlineButton, PageHeader, SegmentedRow, confirmDestructive } from '../CommonUi';
 import { Space, Theme } from '../Theme';
+import { immersiveMedium } from '../../ui/SelectMaterial';
 
 const DOMAIN: number = 0x4e4b;
 const TAG: string = 'NekoBox-Route';
@@ -408,6 +409,8 @@ export struct RouteTab {
     .height('100%')
     .backgroundColor(Theme.BG)
     .bindSheet(this.showAdd!!, this.addPanel(), {
+      // API 26：面板统一走系统沉浸材质（菜单同一套玻璃），设备不支持时系统自动忽略
+      systemMaterial: immersiveMedium(),
       height: 420,
       dragBar: true,
       showClose: true,

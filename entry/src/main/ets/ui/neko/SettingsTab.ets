@@ -24,6 +24,7 @@ import { bytesText } from '../Format';
 import { Accent } from '../Accent';
 import { Space, Theme } from '../Theme';
 import { SEC_ABOUT, SEC_LOGS } from '../Routes';
+import { immersiveMedium } from '../../ui/SelectMaterial';
 
 const DOMAIN: number = 0x4e4b;
 const TAG: string = 'NekoBox-Settings';
@@ -868,6 +869,8 @@ export struct SettingsTab {
     .height('100%')
     .backgroundColor(Theme.BG)
     .bindSheet(this.pickOpen!!, this.pickSheet(), {
+      // API 26：面板统一走系统沉浸材质（菜单同一套玻璃），设备不支持时系统自动忽略
+      systemMaterial: immersiveMedium(),
       height: 420,
       dragBar: true,
       showClose: false,

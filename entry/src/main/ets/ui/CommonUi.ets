@@ -18,7 +18,7 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { ComponentContent, UIContext } from '@kit.ArkUI';
 import { Radius, Space, Theme } from './Theme';
-import { HdsSelectMenuMaterial } from './SelectMaterial';
+import { HdsSelectMenuMaterial, immersiveMedium } from './SelectMaterial';
 import { HAND_RIGHT, Handedness } from '../core/Handedness';
 
 const DOMAIN: number = 0x4e4b;
@@ -650,11 +650,16 @@ export class HdsMenu {
       onPick(index);
     };
     const node: ComponentContent<SimpleMenuParam> = new ComponentContent(ctx, wrapBuilder(simpleMenuPanel), param);
+    /**
+     * ★ API 26 起 `MenuOptions`（`ContextMenuOptions`）自带 **`systemMaterial`** —— 真"玻璃菜单"。
+     *   材质会接管背景/描边/投影，所以**不能再同时给** `backgroundBlurStyle` / `backgroundColor`，
+     *   否则两套叠在一起会发灰（老版本 SDK 没这个字段，之前只能用 blur 凑，注释也留在了这里）。
+     *   设备不支持时系统会忽略这个字段 ⇒ 自动退回系统默认菜单底，不会崩也不会花。
+     */
     const options: MenuOptions = {
       mask: false,
       placement: Placement.BottomRight,
-      backgroundBlurStyle: menuBlurStyle(lightLevel),
-      backgroundBlurStyleOptions: { adaptiveColor: AdaptiveColor.AVERAGE },
+      systemMaterial: immersiveMedium(),
       onWillDisappear: (): void => {
         this.node = undefined;
         this.shown = false;

@@ -191,8 +191,16 @@
     {
       "name": "hero_ink_sub",
       "value": "#D3DBFF"
-    }
-  ]
+    },
+
+      {
+
+        "name": "glass_overlay",
+
+        "value": "#33FFFFFF"
+
+      }
+]
 }
 
 

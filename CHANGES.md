@@ -2192,3 +2192,64 @@ apiReleaseType    = Release   debug = false
 | `dist/ReedBox-unsigned.hap`(debug) | 15,518,492 B | `98664502FCFE8743C4AF1C69BF8FE416CE46D3823556BAC77FD900B105A7BB44` |
 
 三个都传了 WebDAV（回读哈希一致），未发 GitHub Release。
+
+## 2026-11-23 首页菜单/面板接入 API 26 系统玻璃（0.5.74）
+
+甲方："把主页那些地方（几个菜单）都接入 api26 的玻璃"，可参考官方文档或 RzdMusic。
+
+### 一、官方入口（SDK 26 实测）
+
+| 属性 | 位置 | 版本 |
+| --- | --- | --- |
+| `MenuOptions.systemMaterial?: SystemUiMaterial` | `ContextMenuOptions`（`bindMenu` / `promptAction.openMenu` 共用） | `@since 26.0.0` |
+| `SheetOptions.systemMaterial` | `bindSheet` | 26 |
+| `Select.menuSystemMaterial()` | `Select` 下拉菜单 | 26 |
+| `CommonMethod.systemMaterial(material)` | 任意组件通用属性 | 26 |
+
+**关键**：材质会**接管背景/描边/投影** ⇒ 用了 `systemMaterial` 就**不能再同时给**
+`backgroundBlurStyle` / `backgroundColor`，否则两套叠在一起发灰（我们原来 `HdsMenu` 就是这么干的）。
+
+### 二、质感"三件套"（照 RzdMusic `common/musicbasic/RzdMaterial` 的实测结论）
+
+只给 `style + interactive` 出来的是"一块死玻璃"。官方那套要三件一起给：
+
+```ts
+new uiMaterial.ImmersiveMaterial({
+  style: uiMaterial.ImmersiveStyle.REGULAR,
+  applyShadow: true,
+  interactive: true,                                   // 按下有形变
+  materialColor: $r('app.color.glass_overlay'),        // 日间 20% 白纱 / 夜间 20% 黑纱（自适应资源）
+  lightEffect: { color: '#66FFFFFF' }                  // 跟随触点的光效
+})
+```
+
+另外**不要**再"能力探测失败就返回 undefined"：系统会自己忽略这个可选参数，
+给 undefined 反而会掉到系统灰表面（RzdMusic 踩过）。
+
+新增深浅两套资源：`base` 的 `glass_overlay = #33FFFFFF`、`dark` 的 `#33000000`。
+
+### 三、接了哪些地方
+
+- `HdsMenu.open()` 一处改动 ⇒ **所有 `promptAction.openMenu` 菜单**（首页：新建/导入菜单、更多菜单、
+  节点行菜单、分享菜单；分组页菜单）统一变成系统玻璃；顺手删掉冲突的 `backgroundBlurStyle(menuBlurStyle)`。
+- 首页导入面板 + 分组新建/编辑面板 + 路由新增面板 + 节点编辑/设置的“选择”面板（5 处 `bindSheet`）都给
+  `systemMaterial: immersiveMedium()`。
+- `Select` 下拉菜单保持 `menuSystemMaterial`（上一轮已接，本轮把材质换成三件套版本）。
+
+### 四、自检（第 83 项）
+
+"Menus and sheets use the API 26 glass material"：材质必须含 `interactive/lightEffect/materialColor`；
+`HdsMenu` 必须给 `systemMaterial: immersiveMedium()` 且**不许**再出现 `backgroundBlurStyle: menuBlurStyle`；
+5 个 sheet 页面都必须带 `systemMaterial`；深浅两套 `color.json` 都必须有 `glass_overlay`。
+
+### 五、交付
+
+版本 **0.5.74 / 500074**（minAPI 26，Release SDK，两层 verify 通过）。
+
+| 文件 | 大小 | SHA256 |
+| --- | --- | --- |
+| `dist/ReedBox-signed.app` | 13,545,210 B | `49E299EAE538CCEF8529EB560B2B2CBDADAC75AA2B1D46DD0306114436215FB5` |
+| `dist/ReedBox-signed.hap` | 14,278,266 B | `C1964072E4CD3917A62F801789AED31EB938EDE6F61B318C1D8EC378C5FB3507` |
+| `dist/ReedBox-unsigned.hap`(debug) | 15,519,110 B | `4D2265A1F1A2A21E3F0A09CDB4208C95BB6110A01B4836EA199B28C7AD60D410` |
+
+三个都传了 WebDAV（回读哈希一致），未发 GitHub Release。
