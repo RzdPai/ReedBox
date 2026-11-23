@@ -2253,3 +2253,36 @@ new uiMaterial.ImmersiveMaterial({
 | `dist/ReedBox-unsigned.hap`(debug) | 15,519,110 B | `4D2265A1F1A2A21E3F0A09CDB4208C95BB6110A01B4836EA199B28C7AD60D410` |
 
 三个都传了 WebDAV（回读哈希一致），未发 GitHub Release。
+
+## 2026-11-23 半模态面板标题贴着上沿（0.5.75）
+
+甲方截图：分组页「新建分组」面板的标题紧贴面板顶部，一点空隙都没有。
+
+### 一、原因
+
+5 个 `bindSheet` 的面板内容根只有 `.padding({ left, right, bottom: 16 })`，**没有 top**；
+面板上沿就是内容的第一行 ⇒ 标题直接顶在最上面（加了 `dragBar` 之后更明显）。
+
+### 二、修法
+
+所有"半模态面板的内容根"统一补 `top: 20`：
+
+- 首页导入面板（ProfilesPage）
+- 分组页的新建 / 编辑面板（GroupsPage 两处）
+- 路由页的新建规则面板（RouteTab）
+- 设置页的文本面板（SettingsTab）
+- 共用面板 `TextInputSheetPanel` / `PickSheetPanel`（CommonUi 两处，覆盖节点编辑、设置里的"选择"面板）
+
+顺带：节点编辑页 `pickSheet()` 外层原来自己垫了 `padding({ top: 8 })`，现在面板自带 20 ⇒ 去掉，免得多出一截。
+
+### 三、交付
+
+版本 **0.5.75 / 500075**（minAPI 26，Release SDK，两层 verify 通过），自检 83/83。
+
+| 文件 | 大小 | SHA256 |
+| --- | --- | --- |
+| `dist/ReedBox-signed.app` | 13,545,246 B | `1EFEC36D4E5345C4BBDD8A7070DD5D6640A700FBAC4598868DA33D5B233F3BC2` |
+| `dist/ReedBox-signed.hap` | 14,278,195 B | `EF169F2EE59B1E81DEB6CE3A25D5D2E2C67E2724D2AFE341B7D3934BB70AAB9D` |
+| `dist/ReedBox-unsigned.hap`(debug) | 15,519,322 B | `A03508D3555AEB71F8B5ED78FEE17DEB8CF30A5EA38587C6FA7F06A489889DF8` |
+
+三个都传了 WebDAV（回读哈希一致），未发 GitHub Release。

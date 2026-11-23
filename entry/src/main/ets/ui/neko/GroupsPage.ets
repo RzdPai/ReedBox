@@ -665,7 +665,7 @@ export struct GroupsPage {
       .width('100%')
     }
     .width('100%')
-    .padding({ left: Space.PAGE, right: Space.PAGE, bottom: 16 })
+    .padding({ left: Space.PAGE, right: Space.PAGE, top: 20, bottom: 16 })
     .alignItems(HorizontalAlign.Start)
   }
 
@@ -873,7 +873,7 @@ export struct GroupsPage {
     }
     .width('100%')
     .height('100%')
-    .padding({ left: Space.PAGE, right: Space.PAGE, bottom: 16 })
+    .padding({ left: Space.PAGE, right: Space.PAGE, top: 20, bottom: 16 })
     .alignItems(HorizontalAlign.Start)
   }
 
