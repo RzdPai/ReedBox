@@ -161,6 +161,8 @@ export default class EntryAbility extends UIAbility {
         } catch (e) {
           LogStore.addLog(`[app] 释放后台订阅任务失败：${e}`);
         }
+        // 一个 UIAbility 只有一个长时任务槽位：这里停掉之后，KeepAlive 那边的 active 就过期了
+        KeepAlive.onExternalStop(this.context);
       }
       this.backgroundUpdating = false;
     }

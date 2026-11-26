@@ -2286,3 +2286,54 @@ new uiMaterial.ImmersiveMaterial({
 | `dist/ReedBox-unsigned.hap`(debug) | 15,519,322 B | `A03508D3555AEB71F8B5ED78FEE17DEB8CF30A5EA38587C6FA7F06A489889DF8` |
 
 三个都传了 WebDAV（回读哈希一致），未发 GitHub Release。
+
+## 2026-11-26 保活自己失效：9800005 只报错不补挂（0.5.76）
+
+真机日志：
+
+```
+[keepalive] 长时任务续期失败：BussinessError 9800005: Continuous Task verification failed.
+The application has not applied for a continuous task.
+```
+
+### 一、真因：DATA_TRANSFER 任务已被系统回收，而我们的心跳只会报错
+
+- 官方对 `DATA_TRANSFER` 有一条：**"持续更新进度，超过 10 分钟不更新就取消任务"**；
+- 本工程用的 Release SDK **26.0.0.105 没有**进度上报接口（`updateDataTransferProgress` 是 26.0.1 才加的），
+  所以我们其实没法满足这条 → 任务迟早被回收；
+- 旧代码在心跳里 `updateBackgroundRunning().catch(只写日志)`：任务没了也照样每 5 分钟写一行，**保活静默失效**。
+
+### 二、改成"自愈"（`core/KeepAlive.ets` 重写）
+
+1. 心跳 5 分钟 → **4 分钟**（离 10 分钟取消线留余量）；
+2. 每次心跳先 `getAllContinuousTasks(ctx)` 问系统"我的任务还在吗"：
+   - 在 → `updateBackgroundRunning()` 续期；
+   - 不在 / 查询失败但 update 抛 9800005 → **补挂**（`recover()`），而不是只写日志；
+3. 补挂有上限（`MAX_RECOVER = 5`）：超了只记一条"本次连接不再重试保活"，避免刷日志/空转；
+4. 新增 `onExternalStop(ctx)`：**一个 UIAbility 只有一个长时任务槽位** —— 订阅后台更新在 `finally` 里
+   `stopBackgroundRunning()` 之后必须回调它，否则 KeepAlive 的 `active` 是错的，之后每次心跳都是 9800005。
+   `EntryAbility.updateDueSubscriptionsInBackground()` 已接上；
+5. `wanted` / `active` 两个状态分开：`wanted` = 业务希望保活（VPN 连着），`active` = 任务真的挂着。
+
+### 三、自检（第 84 项）
+
+"Keep-alive self-heals when the continuous task is reclaimed"：必须有 `getAllContinuousTasks(ctx)`、
+`recover()`、`MAX_RECOVER`、`onExternalStop()`、4 分钟心跳；**代码里**不许再出现 `长时任务续期失败：` 这种只报错的写法；
+`EntryAbility` 必须回调 `KeepAlive.onExternalStop(this.context)`。
+
+### 四、交付
+
+版本 **0.5.76 / 500076**（minAPI 26，Release SDK，两层 verify 通过，自检 84/84）。
+
+| 文件 | 大小 | SHA256 |
+| --- | --- | --- |
+| `dist/ReedBox-signed.app` | 13,546,023 B | `41383DF82982A768878EE24AE4E43A6785C53FD11D3E8D672E5A8598F209AAF7` |
+| `dist/ReedBox-signed.hap` | 14,276,033 B | `5738316F03DABFC4FA238D2DA9C28491C5E884BB13218F05FA47AEC23F15DA9E` |
+| `dist/ReedBox-unsigned.hap`(debug) | 15,524,736 B | `7C1D9E6478D8F46C868248198254B4C108C35F83B5CBB6A364F16ED9EB103001` |
+
+三个都传了 WebDAV（回读哈希一致），未发 GitHub Release。
+
+### 五、真机待验
+
+后台挂 30 分钟以上：日志里应出现 `长时任务已被系统回收…，重新申请（第 N 次）` 且**隧不断**；
+若看到"补挂次数已达上限"，说明系统不允许持续块，需要再想别的保活路子（例如接 `TASK_KEEPING` 的 ACL 申请）。

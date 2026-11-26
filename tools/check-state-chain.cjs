@@ -1227,6 +1227,26 @@ async function main() {
   });
 
   // ---- 剪贴板：不声明受限权限，一律走官方安全控件（甲方 2026-11-17 要求删掉 READ_PASTEBOARD）----
+  checked('Keep-alive self-heals when the continuous task is reclaimed (9800005)', () => {
+    /**
+     * 真机日志（2026-11-26）：`[keepalive] 长时任务续期失败：BusinessError 9800005 ...
+     * has not applied for a continuous task` —— DATA_TRANSFER 被系统回收后我们只报错不补挂，保活悄悄失效。
+     * 现在要求：心跳先查 getAllContinuousTasks，不在就补挂；update 失败也补挂；有次数上限；
+     * 外部流程停掉任务要回调 onExternalStop。
+     */
+    const src = source('core/KeepAlive.ets');
+    assert.match(src, /getAllContinuousTasks\(ctx\)/);
+    assert.match(src, /private static recover\(ctx: common\.UIAbilityContext, reason: string\): void \{/);
+    assert.match(src, /MAX_RECOVER/);
+    assert.match(src, /static onExternalStop\(ctx: common\.UIAbilityContext \| undefined\): void \{/);
+    assert.match(src, /4 \* 60 \* 1000/);
+    // 不许再出现"续期失败只写日志"的老写法（注释里记录历史日志不算，只看代码）
+    const keepCode = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+    assert.doesNotMatch(keepCode, /长时任务续期失败：/);
+    // EntryAbility 停掉自己挂的临时任务后必须回调
+    assert.match(source('entryability/EntryAbility.ets'), /KeepAlive\.onExternalStop\(this\.context\);/);
+  });
+
   checked('Menus and sheets use the API 26 glass material instead of hand-rolled blur', () => {
     /**
      * 甲方 2026-11-23：主页那几个菜单要接入 API 26 的"玻璃"。
